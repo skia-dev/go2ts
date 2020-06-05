@@ -40,6 +40,7 @@ type ComplexStruct struct {
 	DataPtr               *Data                        `json:"dp"`
 	MapStringSlice        map[string][]*string         `json:"mss"`
 	MapIntKeys            map[int]string               `json:"mik"`
+	MapOtherStruct        map[string]OtherStruct       `json:"mos"`
 	Slice                 []string                     `json:"slice"`
 	SliceOfSlice          [][]string                   `json:"sos"`
 	SliceOfData           []Data                       `json:"sod"`
@@ -84,6 +85,7 @@ export interface ComplexStruct {
 	dp: Data | null;
 	mss: { [key: string]: string[] };
 	mik: { [key: number]: string };
+	mos: { [key: string]: OtherStruct };
 	slice: string[] | null;
 	sos: string[][] | null;
 	sod: Data[] | null;
