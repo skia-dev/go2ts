@@ -128,18 +128,13 @@ func (g *Go2TS) tSTypeFromStructFieldType(reflectType reflect.Type, top bool) *t
 		kind = reflectType.Kind()
 	}
 
-	// If the type has a name, and it isn't one of the primitive types
-	// then add it.
-	if !top &&
-		reflectType.Name() != "" &&
-		!isTime(reflectType) &&
+	if !top && // This codepath should only kick in when we are in the middle of adding a complex type.
+		reflectType.Name() != "" && // Don't bother with anonymous structs.
+		!isTime(reflectType) && // Also skip time.Time.
 		(!isPrimitive(reflectType.Kind()) ||
-			(isPrimitive(reflectType.Kind()) &&
-				reflectType.Name() != reflectType.Kind().String())) {
+			(isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String())) { // Avoids the case where a string shows up with a name of "string" and a kind of "string".
 		typeName, err := g.addType(reflectType, "")
 		if err == nil {
-			fmt.Printf("typeName = %q", typeName)
-
 			return &tsType{
 				typeName:  typeName,
 				canBeNull: ret.canBeNull,
