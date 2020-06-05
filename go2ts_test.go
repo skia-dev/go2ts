@@ -101,14 +101,16 @@ func TestRender_ComplexStruct_Success(t *testing.T) {
 	err := go2ts.Add(ComplexStruct{})
 	require.NoError(t, err)
 	var b bytes.Buffer
-	go2ts.Render(&b)
+	err = go2ts.Render(&b)
+	require.NoError(t, err)
 	assert.Equal(t, complexStructExpected, b.String())
 }
 
 func TestRender_NoTypesAdded_ReturnsEmptyString(t *testing.T) {
 	go2ts := New()
 	var b bytes.Buffer
-	go2ts.Render(&b)
+	err := go2ts.Render(&b)
+	require.NoError(t, err)
 	assert.Equal(t, "", b.String())
 }
 
@@ -127,7 +129,8 @@ func TestRender_SameTypeAddedInMultipleWays_RendersTypeOnce(t *testing.T) {
 	err = go2ts.Add(reflect.New(reflect.TypeOf(SomeStruct{})))
 	require.NoError(t, err)
 	var b bytes.Buffer
-	go2ts.Render(&b)
+	err = go2ts.Render(&b)
+	require.NoError(t, err)
 	expected := `
 export interface SomeStruct {
 	B: string;
@@ -143,7 +146,8 @@ func TestRender_FirstAddDeterminesInterfaceName(t *testing.T) {
 	err = go2ts.Add(reflect.TypeOf(SomeStruct{}))
 	require.NoError(t, err)
 	var b bytes.Buffer
-	go2ts.Render(&b)
+	err = go2ts.Render(&b)
+	require.NoError(t, err)
 	expected := `
 export interface ADifferentName {
 	B: string;
