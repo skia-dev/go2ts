@@ -70,10 +70,13 @@ func (g *Go2TS) AddWithName(v interface{}, interfaceName string) error {
 }
 
 // Render the TypeScript definitions to the given io.Writer.
-func (g *Go2TS) Render(w io.Writer) {
+func (g *Go2TS) Render(w io.Writer) error {
 	for _, st := range g.structs {
-		st.render(w)
+		if err := st.render(w); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // populateTypeDetails fills out the 'partialType' for the given 'typ'.
@@ -260,10 +263,8 @@ export interface {{ .Name }} {
 }
 `))
 
-func (s *structRep) render(w io.Writer) {
-	if err := structRepTemplate.Execute(w, s); err != nil {
-		panic("Template is invalid.")
-	}
+func (s *structRep) render(w io.Writer) error {
+	return structRepTemplate.Execute(w, s)
 }
 
 func removeIndirection(reflectType reflect.Type) reflect.Type {
