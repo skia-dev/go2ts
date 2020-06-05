@@ -80,21 +80,25 @@ export interface ComplexStruct {
 	fe?: number;
 	te?: string;
 	oe?: OtherStruct | null;
-	d: { [key: string]: any };
-	dp: { [key: string]: any } | null;
+	d: Data;
+	dp: Data | null;
 	mss: { [key: string]: string[] };
 	mik: { [key: number]: string };
 	slice: string[] | null;
 	sos: string[][] | null;
-	sod: { [key: string]: any }[] | null;
-	mod: { [key: string]: { [key: string]: any } };
-	mosod: { [key: string]: { [key: string]: any }[] };
-	momosod: { [key: string]: { [key: string]: { [key: string]: any }[] } };
-	mode: string;
+	sod: Data[] | null;
+	mod: { [key: string]: Data };
+	mosod: { [key: string]: Data[] };
+	momosod: { [key: string]: { [key: string]: Data[] } };
+	mode: Mode;
 	inline: Anonymous1;
 	array: string[];
 	Color: Alpha;
 }
+
+export type Data = { [key: string]: any };
+
+export type Mode = string;
 `
 
 func TestRender_ComplexStruct_Success(t *testing.T) {

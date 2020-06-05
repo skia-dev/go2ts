@@ -127,20 +127,19 @@ func (g *Go2TS) tSTypeFromStructFieldType(reflectType reflect.Type, top bool) *t
 		reflectType = removeIndirection(reflectType)
 		kind = reflectType.Kind()
 	}
+
 	// If the type has a name, and it isn't one of the primitive types
 	// then add it.
 
-	if !top && !isPrimitive(reflectType.Kind()) && reflectType.Name() != "" && !isTime(reflectType) {
-		kind := reflectType.Kind()
-		name := reflectType.Name()
+	if !top && (!isPrimitive(reflectType.Kind()) || (isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String())) && reflectType.Name() != "" && !isTime(reflectType) {
 		typeName, err := g.addType(reflectType, "")
 		if err == nil {
-			fmt.Println(typeName)
-		}
-		fmt.Println(typeName, kind, name)
-		return &tsType{
-			typeName:  typeName,
-			canBeNull: ret.canBeNull,
+			fmt.Printf("typeName = %q", typeName)
+
+			return &tsType{
+				typeName:  typeName,
+				canBeNull: ret.canBeNull,
+			}
 		}
 	}
 
