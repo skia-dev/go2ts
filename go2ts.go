@@ -91,24 +91,23 @@ func (g *Go2TS) Render(w io.Writer) error {
 	return nil
 }
 
+// The list if primitive types that we support converting to TypeScript.
 var primitive = map[reflect.Kind]bool{
-	reflect.Bool:       true,
-	reflect.Int:        true,
-	reflect.Int8:       true,
-	reflect.Int16:      true,
-	reflect.Int32:      true,
-	reflect.Int64:      true,
-	reflect.Uint:       true,
-	reflect.Uint8:      true,
-	reflect.Uint16:     true,
-	reflect.Uint32:     true,
-	reflect.Uint64:     true,
-	reflect.Uintptr:    true,
-	reflect.Float32:    true,
-	reflect.Float64:    true,
-	reflect.Complex64:  true,
-	reflect.Complex128: true,
-	reflect.String:     true,
+	reflect.Bool:    true,
+	reflect.Int:     true,
+	reflect.Int8:    true,
+	reflect.Int16:   true,
+	reflect.Int32:   true,
+	reflect.Int64:   true,
+	reflect.Uint:    true,
+	reflect.Uint8:   true,
+	reflect.Uint16:  true,
+	reflect.Uint32:  true,
+	reflect.Uint64:  true,
+	reflect.Uintptr: true,
+	reflect.Float32: true,
+	reflect.Float64: true,
+	reflect.String:  true,
 }
 
 func isPrimitive(kind reflect.Kind) bool {
@@ -200,7 +199,7 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddTyp
 		reflect.Chan,
 		reflect.Func,
 		reflect.UnsafePointer:
-		panic(fmt.Sprintf("Unsupported Go kind: %q", kind))
+		panic(fmt.Sprintf("Go kind %q can't be serialized to JSON.", kind))
 	}
 	return &ret
 }
