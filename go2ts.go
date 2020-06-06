@@ -13,9 +13,13 @@ import (
 
 // Go2TS writes TypeScript interface definitions for the given Go structs.
 type Go2TS struct {
-	structs        []structRep
-	nonStructs     []topLevelTSType
-	seen           map[reflect.Type]string
+	structs    []structRep
+	nonStructs []topLevelTSType
+
+	// seen maps from a reflect.Type to a TypeScript type name.
+	seen map[reflect.Type]string
+
+	// anonymousCount keeps track of the number of anonymous structs we've had to name.
 	anonymousCount int
 }
 
@@ -213,9 +217,8 @@ func (g *Go2TS) addTypeFields(st *structRep, reflectType reflect.Type) {
 			continue
 		}
 
-		structFieldType := structField.Type
 		field := newFieldRep(structField)
-		field.tsType = g.tsTypeFromReflectType(structFieldType, false)
+		field.tsType = g.tsTypeFromReflectType(structField.Type, false)
 		st.Fields = append(st.Fields, field)
 	}
 }
