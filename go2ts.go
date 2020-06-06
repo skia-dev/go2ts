@@ -173,8 +173,7 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddTyp
 		ret.typeName = "boolean"
 	case reflect.Map:
 		ret.typeName = "map"
-		keyTSTtype := g.tsTypeFromReflectType(reflectType.Key(), false)
-		ret.keyType = keyTSTtype.typeName
+		ret.keyType = g.tsTypeFromReflectType(reflectType.Key(), false)
 		ret.subType = g.tsTypeFromReflectType(reflectType.Elem(), false)
 
 	case reflect.Slice, reflect.Array:
@@ -258,7 +257,7 @@ type tsType struct {
 	typeName string
 
 	// keyType is the type of the key if this tsType is a map, such as "string" or "number".
-	keyType string
+	keyType *tsType
 
 	// interfaceName is the name of the TypeScript interface if the tsType is
 	// "interface".
@@ -275,7 +274,7 @@ func (s tsType) String() string {
 	case "array":
 		ret = s.subType.String() + "[]"
 	case "map":
-		ret = fmt.Sprintf("{ [key: %s]: %s }", s.keyType, s.subType.String())
+		ret = fmt.Sprintf("{ [key: %s]: %s }", s.keyType.String(), s.subType.String())
 	case "interface":
 		ret = s.interfaceName
 	default:

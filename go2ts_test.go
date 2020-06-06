@@ -27,29 +27,30 @@ type ComplexStruct struct {
 	String                string `json:"s"`
 	Bool                  bool   `json:"b"`
 	NoTypeAnnotation      string
-	Int                   int                          `json:"i"`
-	Float64               float64                      `json:"f"`
-	Time                  time.Time                    `json:"t"`
-	Other                 *OtherStruct                 `json:"o"`
-	OptionalString        string                       `json:"se,omitempty"`
-	OptionalInt           int                          `json:"ie,omitempty"`
-	OptionalFloat64       float64                      `json:"fe,omitempty"`
-	OptionalTime          time.Time                    `json:"te,omitempty"`
-	OptionalOther         *OtherStruct                 `json:"oe,omitempty"`
-	Data                  Data                         `json:"d"`
-	DataPtr               *Data                        `json:"dp"`
-	MapStringSlice        map[string][]*string         `json:"mss"`
-	MapIntKeys            map[int]string               `json:"mik"`
-	MapOtherStruct        map[string]OtherStruct       `json:"mos"`
-	Slice                 []string                     `json:"slice"`
-	SliceOfSlice          [][]string                   `json:"sos"`
-	SliceOfData           []Data                       `json:"sod"`
-	MapOfData             map[string]Data              `json:"mod"`
-	MapOfSliceOfData      map[string][]Data            `json:"mosod"`
-	MapOfMapOfSliceOfData map[string]map[string][]Data `json:"momosod"`
-	Mode                  Mode                         `json:"mode"`
-	InlineStruct          struct{ A int }              `json:"inline"`
-	Array                 [3]string                    `json:"array"`
+	Int                   int                            `json:"i"`
+	Float64               float64                        `json:"f"`
+	Time                  time.Time                      `json:"t"`
+	Other                 *OtherStruct                   `json:"o"`
+	OptionalString        string                         `json:"se,omitempty"`
+	OptionalInt           int                            `json:"ie,omitempty"`
+	OptionalFloat64       float64                        `json:"fe,omitempty"`
+	OptionalTime          time.Time                      `json:"te,omitempty"`
+	OptionalOther         *OtherStruct                   `json:"oe,omitempty"`
+	Data                  Data                           `json:"d"`
+	DataPtr               *Data                          `json:"dp"`
+	MapStringSlice        map[string][]*string           `json:"mss"`
+	MapIntKeys            map[int]string                 `json:"mik"`
+	MapOtherStruct        map[string]OtherStruct         `json:"mos"`
+	Slice                 []string                       `json:"slice"`
+	SliceOfSlice          [][]string                     `json:"sos"`
+	SliceOfData           []Data                         `json:"sod"`
+	MapOfData             map[string]Data                `json:"mod"`
+	MapOfSliceOfData      map[string][]Data              `json:"mosod"`
+	MapOfMapOfSliceOfData map[string]map[string][]Data   `json:"momosod"`
+	Mode                  Mode                           `json:"mode"`
+	InlineStruct          struct{ A int }                `json:"inline"`
+	MapInlineStructKey    map[struct{ B float32 }]string `json:"mapinlinestructkey"`
+	Array                 [3]string                      `json:"array"`
 	skipped               bool
 	Color                 color.Alpha
 }
@@ -62,6 +63,10 @@ export interface OtherStruct {
 
 export interface Anonymous1 {
 	A: number;
+}
+
+export interface Anonymous2 {
+	B: number;
 }
 
 export interface Alpha {
@@ -94,6 +99,7 @@ export interface ComplexStruct {
 	momosod: { [key: string]: { [key: string]: Data[] } };
 	mode: Mode;
 	inline: Anonymous1;
+	mapinlinestructkey: { [key: Anonymous2]: string };
 	array: string[];
 	Color: Alpha;
 }
