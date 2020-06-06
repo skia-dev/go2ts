@@ -115,11 +115,7 @@ func isPrimitive(kind reflect.Kind) bool {
 	return primitive[kind]
 }
 
-// populateTypeDetails fills out the 'partialType' for the given 'typ'.
-//
-// It will recursively add subTypes to the partialType until the type is
-// completely described.
-func (g *Go2TS) tSTypeFromStructFieldType(reflectType reflect.Type, top bool) *tsType {
+func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddType bool) *tsType {
 	var ret tsType
 	kind := reflectType.Kind()
 	if kind == reflect.Ptr {
@@ -128,7 +124,12 @@ func (g *Go2TS) tSTypeFromStructFieldType(reflectType reflect.Type, top bool) *t
 		kind = reflectType.Kind()
 	}
 
-	if !top && // This codepath should only kick in when we are in the middle of adding a complex type.
+	// As we build up the chain of tsType -> tsType that fully describes a type
+	// we come across named type. For example: map[string]Donut, where Donut
+	// could be a "type Donut struct {...}", or a type based on a primitive
+	// type, such as "type Donut string". In this case we need to add that type
+	// to all of our known types and return a reference to that type from here.
+	if !calledFromAddType && // This codepath should only kick in when we are in the middle of adding a complex type, not when we've been called directly by addType().
 		reflectType.Name() != "" && // Don't bother with anonymous structs.
 		!isTime(reflectType) && // Also skip time.Time.
 		(!isPrimitive(reflectType.Kind()) ||
@@ -172,16 +173,14 @@ func (g *Go2TS) tSTypeFromStructFieldType(reflectType reflect.Type, top bool) *t
 		ret.typeName = "boolean"
 	case reflect.Map:
 		ret.typeName = "map"
-		keyTSTtype := g.tSTypeFromStructFieldType(reflectType.Key(), false)
+		keyTSTtype := g.tsTypeFromReflectType(reflectType.Key(), false)
 		ret.keyType = keyTSTtype.typeName
-
-		ret.subType = g.tSTypeFromStructFieldType(reflectType.Elem(), false)
+		ret.subType = g.tsTypeFromReflectType(reflectType.Elem(), false)
 
 	case reflect.Slice, reflect.Array:
 		ret.typeName = "array"
 		ret.canBeNull = (kind == reflect.Slice)
-
-		ret.subType = g.tSTypeFromStructFieldType(reflectType.Elem(), false)
+		ret.subType = g.tsTypeFromReflectType(reflectType.Elem(), false)
 
 	case reflect.Struct:
 		if isTime(reflectType) {
@@ -209,7 +208,7 @@ func (g *Go2TS) addTypeFields(st *structRep, reflectType reflect.Type) {
 
 		structFieldType := structField.Type
 		field := newFieldRep(structField)
-		field.tsType = g.tSTypeFromStructFieldType(structFieldType, false)
+		field.tsType = g.tsTypeFromReflectType(structFieldType, false)
 		st.Fields = append(st.Fields, field)
 	}
 }
@@ -246,7 +245,7 @@ func (g *Go2TS) addType(reflectType reflect.Type, interfaceName string) (string,
 
 	// Handle non-struct types.
 	topLevelTSType := newTopLevelTSType(reflectType)
-	topLevelTSType.tsType = g.tSTypeFromStructFieldType(reflectType, true)
+	topLevelTSType.tsType = g.tsTypeFromReflectType(reflectType, true)
 	g.seen[reflectType] = topLevelTSType.name
 	g.nonStructs = append(g.nonStructs, topLevelTSType)
 	return topLevelTSType.name, nil
