@@ -13,8 +13,8 @@ import (
 
 // Go2TS writes TypeScript interface definitions for the given Go structs.
 type Go2TS struct {
-	structs    []structRep
-	nonStructs []topLevelTSType
+	interfaces []interfaceRep
+	types      []topLevelTSType
 
 	// seen maps from a reflect.Type to a TypeScript type name.
 	seen map[reflect.Type]string
@@ -80,14 +80,14 @@ func (g *Go2TS) Render(w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	for _, st := range g.structs {
-		if err := st.render(w); err != nil {
+	for _, intf := range g.interfaces {
+		if err := intf.render(w); err != nil {
 			return err
 		}
 	}
 
-	for _, ns := range g.nonStructs {
-		if _, err := fmt.Fprintln(w, ns.String()); err != nil {
+	for _, typ := range g.types {
+		if _, err := fmt.Fprintln(w, typ.String()); err != nil {
 			return err
 		}
 	}
@@ -208,7 +208,7 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddTyp
 	return &ret
 }
 
-func (g *Go2TS) addTypeFields(st *structRep, reflectType reflect.Type) {
+func (g *Go2TS) addTypeFields(st *interfaceRep, reflectType reflect.Type) {
 	for i := 0; i < reflectType.NumField(); i++ {
 		structField := reflectType.Field(i)
 
@@ -242,22 +242,22 @@ func (g *Go2TS) addType(reflectType reflect.Type, interfaceName string) (string,
 			interfaceName = g.getAnonymousInterfaceName()
 		}
 
-		st := structRep{
+		intf := interfaceRep{
 			Name:   interfaceName,
 			Fields: make([]fieldRep, 0, reflectType.NumField()),
 		}
 
-		g.seen[reflectType] = st.Name
-		g.addTypeFields(&st, reflectType)
-		g.structs = append(g.structs, st)
-		return st.Name, nil
+		g.seen[reflectType] = intf.Name
+		g.addTypeFields(&intf, reflectType)
+		g.interfaces = append(g.interfaces, intf)
+		return intf.Name, nil
 	}
 
 	// Handle non-struct types.
 	topLevelTSType := newTopLevelTSType(reflectType)
 	topLevelTSType.tsType = g.tsTypeFromReflectType(reflectType, true)
 	g.seen[reflectType] = topLevelTSType.name
-	g.nonStructs = append(g.nonStructs, topLevelTSType)
+	g.types = append(g.types, topLevelTSType)
 	return topLevelTSType.name, nil
 }
 
@@ -350,14 +350,14 @@ func isTime(t reflect.Type) bool {
 	return t.Name() == "Time" && t.PkgPath() == "time"
 }
 
-// structRep represents a single Go struct.
-type structRep struct {
+// interfaceRep represents a single Go struct that gets emitted as a TypeScript interface.
+type interfaceRep struct {
 	// Name is the TypeScript interface Name in the generated output.
 	Name   string
 	Fields []fieldRep
 }
 
-var structRepTemplate = template.Must(template.New("").Parse(`
+var interfaceRepTemplate = template.Must(template.New("").Parse(`
 export interface {{ .Name }} {
 {{ range .Fields -}}
 	{{- . }}
@@ -365,8 +365,8 @@ export interface {{ .Name }} {
 }
 `))
 
-func (s *structRep) render(w io.Writer) error {
-	return structRepTemplate.Execute(w, s)
+func (s *interfaceRep) render(w io.Writer) error {
+	return interfaceRepTemplate.Execute(w, s)
 }
 
 func removeIndirection(reflectType reflect.Type) reflect.Type {
