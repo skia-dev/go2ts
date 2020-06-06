@@ -143,16 +143,15 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddTyp
 		}
 	}
 
-	// Default to using the reflect.Type name as the TypeScript type name.
+	// Default to using the Go lang type name as the TypeScript type name.
 	nativeType := reflectType.String()
 
-	// Strip off the module name of the nativeType if present.
+	// Strip off the module name of the native type if present.
 	if i := strings.IndexByte(nativeType, '.'); i > -1 {
 		nativeType = nativeType[i+1:]
 	}
 	ret.typeName = nativeType
 
-	// Update the type if the kind points to something besides a primitive type.
 	switch kind {
 	case reflect.Uint8,
 		reflect.Uint16,
@@ -167,10 +166,13 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddTyp
 		reflect.Float32,
 		reflect.Float64:
 		ret.typeName = "number"
+
 	case reflect.String:
 		ret.typeName = "string"
+
 	case reflect.Bool:
 		ret.typeName = "boolean"
+
 	case reflect.Map:
 		ret.typeName = "map"
 		ret.keyType = g.tsTypeFromReflectType(reflectType.Key(), false)
@@ -192,6 +194,13 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddTyp
 
 	case reflect.Interface:
 		ret.typeName = "any"
+
+	case reflect.Complex64,
+		reflect.Complex128,
+		reflect.Chan,
+		reflect.Func,
+		reflect.UnsafePointer:
+		panic(fmt.Sprintf("Unsupported Go kind: %q", kind))
 	}
 	return &ret
 }

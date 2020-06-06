@@ -184,3 +184,19 @@ export type Data = { [key: string]: any };
 `
 	assert.Equal(t, expected, b.String())
 }
+
+type HasUnsupportedFieldTypes struct {
+	C complex128
+}
+
+func TestAdd_UnsupportedType_Panic(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			assert.Fail(t, "Complex128 is unsupported and should panic.")
+		}
+	}()
+
+	go2ts := New()
+	err := go2ts.Add(HasUnsupportedFieldTypes{})
+	require.NoError(t, err)
+}
