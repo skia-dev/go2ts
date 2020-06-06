@@ -128,16 +128,18 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddTyp
 		kind = reflectType.Kind()
 	}
 
-	// As we build up the chain of tsTypes that fully describes a type we may come
-	// across named type. For example: map[string]Donut, where Donut could be a
-	// "type Donut struct {...}", or a type based on a primitive type, such as
-	// "type Donut string". In this case we need to add that type to all of our
-	// known types and return a reference to that type from here.
+	// As we build up the chain of tsTypes that fully describes a typeDefinition
+	// we may come across named types. For example: map[string]Donut, where
+	// Donut could be a "type Donut struct {...}", or a type based on a
+	// primitive type, such as "type Donut string". In this case we need to add
+	// that type to all of our known types and return a reference to that type
+	// from here.
 	if !calledFromAddType && // Don't do this if called from addType().
 		reflectType.Name() != "" && // Don't bother with anonymous structs.
 		!isTime(reflectType) && // Also skip time.Time.
-		(!isPrimitive(reflectType.Kind()) ||
-			(isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String())) { // Avoids the case where a string shows up with a name of "string" and a kind of "string".
+		(!isPrimitive(reflectType.Kind()) || // And either it's not a primitive Kind.
+			// Or it's case where a primitive Kind like string shows up with a type name.
+			(isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String())) {
 		typeName, err := g.addType(reflectType, "")
 		if err == nil {
 			return &tsType{
@@ -256,6 +258,9 @@ func (g *Go2TS) addType(reflectType reflect.Type, interfaceName string) (string,
 
 	// Handle non-struct types.
 	typeDefinition := newTypeDefinition(reflectType)
+	if interfaceName != "" {
+		typeDefinition.name = interfaceName
+	}
 	typeDefinition.tsType = g.tsTypeFromReflectType(reflectType, true)
 	g.seen[reflectType] = typeDefinition.name
 	g.types = append(g.types, typeDefinition)
@@ -296,6 +301,7 @@ func (s tsType) String() string {
 	return ret
 }
 
+// typeDefinition represents a TypeScript type definition.
 type typeDefinition struct {
 	name   string
 	tsType *tsType
