@@ -124,12 +124,12 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddTyp
 		kind = reflectType.Kind()
 	}
 
-	// As we build up the chain of tsType -> tsType that fully describes a type
-	// we come across named type. For example: map[string]Donut, where Donut
-	// could be a "type Donut struct {...}", or a type based on a primitive
-	// type, such as "type Donut string". In this case we need to add that type
-	// to all of our known types and return a reference to that type from here.
-	if !calledFromAddType && // This codepath should only kick in when we are in the middle of adding a complex type, not when we've been called directly by addType().
+	// As we build up the chain of tsTypes that fully describes a type we may come
+	// across named type. For example: map[string]Donut, where Donut could be a
+	// "type Donut struct {...}", or a type based on a primitive type, such as
+	// "type Donut string". In this case we need to add that type to all of our
+	// known types and return a reference to that type from here.
+	if !calledFromAddType && // Don't do this if called from addType().
 		reflectType.Name() != "" && // Don't bother with anonymous structs.
 		!isTime(reflectType) && // Also skip time.Time.
 		(!isPrimitive(reflectType.Kind()) ||
@@ -143,14 +143,14 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddTyp
 		}
 	}
 
-	// Default to setting the tsType from the Go type.
-	if !isPrimitive(reflectType.Kind()) {
-		nativeType := reflectType.String()
-		if i := strings.IndexByte(nativeType, '.'); i > -1 {
-			nativeType = nativeType[i+1:]
-		}
-		ret.typeName = nativeType
+	// Default to using the reflect.Type name as the TypeScript type name.
+	nativeType := reflectType.String()
+
+	// Strip off the module name of the nativeType if present.
+	if i := strings.IndexByte(nativeType, '.'); i > -1 {
+		nativeType = nativeType[i+1:]
 	}
+	ret.typeName = nativeType
 
 	// Update the type if the kind points to something besides a primitive type.
 	switch kind {
