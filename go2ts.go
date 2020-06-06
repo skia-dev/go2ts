@@ -143,13 +143,37 @@ func (g *Go2TS) tSTypeFromStructFieldType(reflectType reflect.Type, top bool) *t
 	}
 
 	// Default to setting the tsType from the Go type.
-	ret.typeName = reflectTypeToTypeScriptType(reflectType)
+	if !isPrimitive(reflectType.Kind()) {
+		nativeType := reflectType.String()
+		if i := strings.IndexByte(nativeType, '.'); i > -1 {
+			nativeType = nativeType[i+1:]
+		}
+		ret.typeName = nativeType
+	}
 
 	// Update the type if the kind points to something besides a primitive type.
 	switch kind {
+	case reflect.Uint8,
+		reflect.Uint16,
+		reflect.Uint32,
+		reflect.Uint64,
+		reflect.Uint,
+		reflect.Int8,
+		reflect.Int16,
+		reflect.Int32,
+		reflect.Int64,
+		reflect.Int,
+		reflect.Float32,
+		reflect.Float64:
+		ret.typeName = "number"
+	case reflect.String:
+		ret.typeName = "string"
+	case reflect.Bool:
+		ret.typeName = "boolean"
 	case reflect.Map:
 		ret.typeName = "map"
-		ret.keyType = reflectTypeToTypeScriptType(reflectType.Key())
+		keyTSTtype := g.tSTypeFromStructFieldType(reflectType.Key(), false)
+		ret.keyType = keyTSTtype.typeName
 
 		ret.subType = g.tSTypeFromStructFieldType(reflectType.Elem(), false)
 
@@ -161,11 +185,12 @@ func (g *Go2TS) tSTypeFromStructFieldType(reflectType reflect.Type, top bool) *t
 
 	case reflect.Struct:
 		if isTime(reflectType) {
-			break
+			ret.typeName = "string"
+		} else {
+			ret.typeName = "interface"
+			name, _ := g.addType(reflectType, "")
+			ret.interfaceName = name
 		}
-		ret.typeName = "interface"
-		name, _ := g.addType(reflectType, "")
-		ret.interfaceName = name
 
 	case reflect.Interface:
 		ret.typeName = "any"
@@ -218,8 +243,9 @@ func (g *Go2TS) addType(reflectType reflect.Type, interfaceName string) (string,
 		g.structs = append(g.structs, st)
 		return st.Name, nil
 	}
-	topLevelTSType := newTopLevelTSType(reflectType)
 
+	// Handle non-struct types.
+	topLevelTSType := newTopLevelTSType(reflectType)
 	topLevelTSType.tsType = g.tSTypeFromStructFieldType(reflectType, true)
 	g.seen[reflectType] = topLevelTSType.name
 	g.nonStructs = append(g.nonStructs, topLevelTSType)
@@ -342,39 +368,4 @@ func removeIndirection(reflectType reflect.Type) reflect.Type {
 		kind = reflectType.Kind()
 	}
 	return reflectType
-}
-
-func reflectTypeToTypeScriptType(typ reflect.Type) string {
-	if isTime(typ) {
-		return "string"
-	}
-
-	kind := typ.Kind()
-	switch kind {
-	case reflect.Uint8,
-		reflect.Uint16,
-		reflect.Uint32,
-		reflect.Uint64,
-		reflect.Uint,
-		reflect.Int8,
-		reflect.Int16,
-		reflect.Int32,
-		reflect.Int64,
-		reflect.Int,
-		reflect.Float32,
-		reflect.Float64:
-		return "number"
-	case reflect.String:
-		return "string"
-	case reflect.Bool:
-		return "boolean"
-	}
-
-	// Falling through to use the native type.
-	nativeType := typ.String()
-	// Drop the package prefix.
-	if i := strings.IndexByte(nativeType, '.'); i > -1 {
-		nativeType = nativeType[i+1:]
-	}
-	return nativeType
 }
