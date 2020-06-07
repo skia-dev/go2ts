@@ -1,5 +1,7 @@
 # go2ts
 
+![Go](https://github.com/skia-dev/go2ts/workflows/Go/badge.svg?branch=master)
+
 An extremely simple and powerful Go struct to Typescript interface generator.
 
 Inspired by [https://github.com/OneOfOne/struct2ts](https://github.com/OneOfOne/struct2ts).
