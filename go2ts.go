@@ -315,5 +315,3 @@ func reflectTypeToTypeScriptType(typ reflect.Type) string {
 	}
 	return nativeType
 }
-    
-    
