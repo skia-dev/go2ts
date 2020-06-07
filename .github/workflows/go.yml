@@ -1,5 +1,9 @@
 name: Go
 
+defaults:
+  run:
+    shell: bash
+
 on:
   push:
     branches: [master]
@@ -23,6 +27,12 @@ jobs:
       - name: Get dependencies
         run: |
           go get -v -t -d ./...
+
+      - name: Format (Run "gofmt -s -w ." to apply fixes.)
+        run: test -z "$(gofmt -s -d .)"
+
+      - name: Vet
+        run: go vet .
 
       - name: Build
         run: go build -v .
