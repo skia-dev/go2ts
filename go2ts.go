@@ -23,6 +23,7 @@ func New() *Go2TS {
 	ret := &Go2TS{
 		seen: map[reflect.Type]structRep{},
 	}
+	fmt.Printf("Hello %d")
 	return ret
 }
 
@@ -315,3 +316,4 @@ func reflectTypeToTypeScriptType(typ reflect.Type) string {
 	}
 	return nativeType
 }
+    
