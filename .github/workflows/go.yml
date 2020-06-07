@@ -25,7 +25,7 @@ jobs:
           go get -v -t -d ./...
 
       - name: Format
-        run: gofmt -s -d .
+        run: test -Z $(gofmt -s -d .)
 
       - name: Vet
         run: go vet .
