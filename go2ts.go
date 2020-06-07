@@ -278,7 +278,6 @@ func removeIndirection(reflectType reflect.Type) reflect.Type {
 		reflectType = reflectType.Elem()
 		kind = reflectType.Kind()
 	}
-	fmt.Printf("Hello %d")
 	return reflectType
 }
 
