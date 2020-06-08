@@ -13,15 +13,21 @@ import (
 
 // Go2TS writes TypeScript interface definitions for the given Go structs.
 type Go2TS struct {
-	structs        []structRep
-	seen           map[reflect.Type]structRep
+	interfaces []interfaceDefinition
+	types      []typeDefinition
+
+	// seen maps from a reflect.Type that's already been seen to its TypeScript
+	// type name.
+	seen map[reflect.Type]string
+
+	// anonymousCount keeps track of the number of anonymous structs we've had to name.
 	anonymousCount int
 }
 
-// New returns a new *StructToTS.
+// New returns a new *GoToTS.
 func New() *Go2TS {
 	ret := &Go2TS{
-		seen: map[reflect.Type]structRep{},
+		seen: map[reflect.Type]string{},
 	}
 	return ret
 }
@@ -75,19 +81,45 @@ func (g *Go2TS) Render(w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	for _, st := range g.structs {
-		if err := st.render(w); err != nil {
+	for _, intf := range g.interfaces {
+		if err := intf.render(w); err != nil {
 			return err
 		}
 	}
+
+	for _, typ := range g.types {
+		if _, err := fmt.Fprintln(w, typ.String()); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-// populateTypeDetails fills out the 'partialType' for the given 'typ'.
-//
-// It will recursively add subTypes to the partialType until the type is
-// completely described.
-func (g *Go2TS) tSTypeFromStructFieldType(reflectType reflect.Type) *tsType {
+// primitive is the list of Kinds that we support converting to TypeScript.
+var primitive = map[reflect.Kind]bool{
+	reflect.Bool:    true,
+	reflect.Int:     true,
+	reflect.Int8:    true,
+	reflect.Int16:   true,
+	reflect.Int32:   true,
+	reflect.Int64:   true,
+	reflect.Uint:    true,
+	reflect.Uint8:   true,
+	reflect.Uint16:  true,
+	reflect.Uint32:  true,
+	reflect.Uint64:  true,
+	reflect.Uintptr: true,
+	reflect.Float32: true,
+	reflect.Float64: true,
+	reflect.String:  true,
+}
+
+func isPrimitive(kind reflect.Kind) bool {
+	return primitive[kind]
+}
+
+func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, isRecursive bool) *tsType {
 	var ret tsType
 	kind := reflectType.Kind()
 	if kind == reflect.Ptr {
@@ -96,38 +128,93 @@ func (g *Go2TS) tSTypeFromStructFieldType(reflectType reflect.Type) *tsType {
 		kind = reflectType.Kind()
 	}
 
-	// Default to setting the tsType from the Go type.
-	ret.typeName = reflectTypeToTypeScriptType(reflectType)
+	// As we build up the chain of tsTypes that fully describes a typeDefinition
+	// we may come across named types. For example: map[string]Donut, where
+	// Donut could be "type Donut string". Without this path the Donut type
+	// doesn't get added and map[string]Donut just gets emitted as '{
+	// [key:string]: string}' and not '{ [key:string]: Donut}' In this case we
+	// need to add that type to all of our known types and return a reference to
+	// that type from here.
+	if !isRecursive && // Don't do this if called from addType().
+		reflectType.Name() != "" && // We only want this path for Kinds with a name.
+		!isTime(reflectType) && // Also skip time.Time, see AddWithName for explaination of time.Time handling.
+		(!isPrimitive(reflectType.Kind()) || // And either it's not a primitive Kind.
+			// Or it's case where a primitive Kind like string shows up with a type name.
+			(isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String())) {
+		typeName, err := g.addType(reflectType, "")
+		if err == nil {
+			return &tsType{
+				typeName:  typeName,
+				canBeNull: ret.canBeNull,
+			}
+		}
+	}
 
-	// Update the type if the kind points to something besides a primitive type.
+	// Default to using the Go lang type name as the TypeScript type name.
+	nativeType := reflectType.String()
+
+	// Strip off the module name of the native type if present.
+	if i := strings.IndexByte(nativeType, '.'); i > -1 {
+		nativeType = nativeType[i+1:]
+	}
+	ret.typeName = nativeType
+
 	switch kind {
+	case reflect.Uint8,
+		reflect.Uint16,
+		reflect.Uint32,
+		reflect.Uint64,
+		reflect.Uint,
+		reflect.Int8,
+		reflect.Int16,
+		reflect.Int32,
+		reflect.Int64,
+		reflect.Int,
+		reflect.Float32,
+		reflect.Float64:
+		ret.typeName = "number"
+
+	case reflect.String:
+		ret.typeName = "string"
+
+	case reflect.Bool:
+		ret.typeName = "boolean"
+
 	case reflect.Map:
 		ret.typeName = "map"
-		ret.keyType = reflectTypeToTypeScriptType(reflectType.Key())
-
-		ret.subType = g.tSTypeFromStructFieldType(reflectType.Elem())
+		ret.keyType = g.tsTypeFromReflectType(reflectType.Key(), false)
+		ret.subType = g.tsTypeFromReflectType(reflectType.Elem(), false)
 
 	case reflect.Slice, reflect.Array:
 		ret.typeName = "array"
 		ret.canBeNull = (kind == reflect.Slice)
-
-		ret.subType = g.tSTypeFromStructFieldType(reflectType.Elem())
+		ret.subType = g.tsTypeFromReflectType(reflectType.Elem(), false)
 
 	case reflect.Struct:
 		if isTime(reflectType) {
-			break
+			ret.typeName = "string"
+		} else {
+			ret.typeName = "interface"
+			name, _ := g.addType(reflectType, "")
+			ret.interfaceName = name
 		}
-		ret.typeName = "interface"
-		st, _ := g.addType(reflectType, "")
-		ret.interfaceName = st.Name
 
 	case reflect.Interface:
 		ret.typeName = "any"
+
+	case reflect.Complex64,
+		reflect.Complex128,
+		reflect.Chan,
+		reflect.Func,
+		reflect.UnsafePointer:
+		panic(fmt.Sprintf("Go Kind %q cannot be serialized to JSON.", kind))
 	}
 	return &ret
 }
 
-func (g *Go2TS) addTypeFields(st *structRep, reflectType reflect.Type) {
+// addInterfaceFields populates the fields of the given interfaceDefinition. It
+// assumes reflectType's Kind is Struct.
+func (g *Go2TS) addInterfaceFields(id *interfaceDefinition, reflectType reflect.Type) {
 	for i := 0; i < reflectType.NumField(); i++ {
 		structField := reflectType.Field(i)
 
@@ -136,10 +223,9 @@ func (g *Go2TS) addTypeFields(st *structRep, reflectType reflect.Type) {
 			continue
 		}
 
-		structFieldType := structField.Type
-		field := newFieldRep(structField)
-		field.tsType = g.tSTypeFromStructFieldType(structFieldType)
-		st.Fields = append(st.Fields, field)
+		field := newFieldDefinition(structField)
+		field.tsType = g.tsTypeFromReflectType(structField.Type, false)
+		id.Fields = append(id.Fields, field)
 	}
 }
 
@@ -148,35 +234,40 @@ func (g *Go2TS) getAnonymousInterfaceName() string {
 	return fmt.Sprintf("Anonymous%d", g.anonymousCount)
 }
 
-func (g *Go2TS) addType(reflectType reflect.Type, interfaceName string) (structRep, error) {
-	var ret structRep
-
+func (g *Go2TS) addType(reflectType reflect.Type, interfaceName string) (string, error) {
 	reflectType = removeIndirection(reflectType)
-	var ok bool
-	if ret, ok = g.seen[reflectType]; ok {
-		return ret, nil
+	if tsTypeName, ok := g.seen[reflectType]; ok {
+		return tsTypeName, nil
 	}
 
-	if reflectType.Kind() != reflect.Struct {
-		return structRep{}, fmt.Errorf("%s is not a struct.", reflectType)
+	if reflectType.Kind() == reflect.Struct {
+		if interfaceName == "" {
+			interfaceName = strings.Title(reflectType.Name())
+		}
+		if interfaceName == "" {
+			interfaceName = g.getAnonymousInterfaceName()
+		}
+
+		intf := interfaceDefinition{
+			Name:   interfaceName,
+			Fields: make([]fieldDefinition, 0, reflectType.NumField()),
+		}
+
+		g.seen[reflectType] = intf.Name
+		g.addInterfaceFields(&intf, reflectType)
+		g.interfaces = append(g.interfaces, intf)
+		return intf.Name, nil
 	}
 
-	if interfaceName == "" {
-		interfaceName = strings.Title(reflectType.Name())
+	// Handle non-struct types.
+	typeDefinition := newTypeDefinition(reflectType)
+	if interfaceName != "" {
+		typeDefinition.name = interfaceName
 	}
-	if interfaceName == "" {
-		interfaceName = g.getAnonymousInterfaceName()
-	}
-
-	ret = structRep{
-		Name:   interfaceName,
-		Fields: make([]fieldRep, 0, reflectType.NumField()),
-	}
-
-	g.seen[reflectType] = ret
-	g.addTypeFields(&ret, reflectType)
-	g.structs = append(g.structs, ret)
-	return ret, nil
+	typeDefinition.tsType = g.tsTypeFromReflectType(reflectType, true)
+	g.seen[reflectType] = typeDefinition.name
+	g.types = append(g.types, typeDefinition)
+	return typeDefinition.name, nil
 }
 
 // tsType represents either a type of a field, like "string", or part of
@@ -186,7 +277,7 @@ type tsType struct {
 	typeName string
 
 	// keyType is the type of the key if this tsType is a map, such as "string" or "number".
-	keyType string
+	keyType *tsType
 
 	// interfaceName is the name of the TypeScript interface if the tsType is
 	// "interface".
@@ -203,7 +294,7 @@ func (s tsType) String() string {
 	case "array":
 		ret = s.subType.String() + "[]"
 	case "map":
-		ret = fmt.Sprintf("{ [key: %s]: %s }", s.keyType, s.subType.String())
+		ret = fmt.Sprintf("{ [key: %s]: %s }", s.keyType.String(), s.subType.String())
 	case "interface":
 		ret = s.interfaceName
 	default:
@@ -213,15 +304,32 @@ func (s tsType) String() string {
 	return ret
 }
 
-// fieldRep represents one field in a struct.
-type fieldRep struct {
+// typeDefinition represents a TypeScript type definition.
+type typeDefinition struct {
+	name   string
+	tsType *tsType
+}
+
+func (t typeDefinition) String() string {
+	return fmt.Sprintf("\nexport type %s = %s;", t.name, t.tsType.String())
+}
+
+// newTypeDefinition creates a new typeDefinition from the given reflect.Type.
+func newTypeDefinition(reflectType reflect.Type) typeDefinition {
+	return typeDefinition{
+		name: reflectType.Name(),
+	}
+}
+
+// fieldDefinition represents one field in an interface.
+type fieldDefinition struct {
 	// The name of the interface field.
 	name       string
 	tsType     *tsType
 	isOptional bool
 }
 
-func (f fieldRep) String() string {
+func (f fieldDefinition) String() string {
 	optional := ""
 	if f.isOptional {
 		optional = "?"
@@ -235,9 +343,9 @@ func (f fieldRep) String() string {
 	return fmt.Sprintf("\t%s%s: %s%s;", f.name, optional, f.tsType.String(), canBeNull)
 }
 
-// newFieldRep creates a new fieldRep from the given reflect.StructField.
-func newFieldRep(structField reflect.StructField) fieldRep {
-	var ret fieldRep
+// newFieldDefinition creates a new fieldDefinition from the given reflect.StructField.
+func newFieldDefinition(structField reflect.StructField) fieldDefinition {
+	var ret fieldDefinition
 	jsonTag := strings.Split(structField.Tag.Get("json"), ",")
 
 	ret.name = structField.Name
@@ -252,14 +360,15 @@ func isTime(t reflect.Type) bool {
 	return t.Name() == "Time" && t.PkgPath() == "time"
 }
 
-// structRep represents a single Go struct.
-type structRep struct {
+// interfaceDefinition represents a single Go struct that gets emitted as a
+// TypeScript interface.
+type interfaceDefinition struct {
 	// Name is the TypeScript interface Name in the generated output.
 	Name   string
-	Fields []fieldRep
+	Fields []fieldDefinition
 }
 
-var structRepTemplate = template.Must(template.New("").Parse(`
+var interfaceDefinitionTemplate = template.Must(template.New("").Parse(`
 export interface {{ .Name }} {
 {{ range .Fields -}}
 	{{- . }}
@@ -267,8 +376,8 @@ export interface {{ .Name }} {
 }
 `))
 
-func (s *structRep) render(w io.Writer) error {
-	return structRepTemplate.Execute(w, s)
+func (s *interfaceDefinition) render(w io.Writer) error {
+	return interfaceDefinitionTemplate.Execute(w, s)
 }
 
 func removeIndirection(reflectType reflect.Type) reflect.Type {
@@ -279,39 +388,4 @@ func removeIndirection(reflectType reflect.Type) reflect.Type {
 		kind = reflectType.Kind()
 	}
 	return reflectType
-}
-
-func reflectTypeToTypeScriptType(typ reflect.Type) string {
-	if isTime(typ) {
-		return "string"
-	}
-
-	kind := typ.Kind()
-	switch kind {
-	case reflect.Uint8,
-		reflect.Uint16,
-		reflect.Uint32,
-		reflect.Uint64,
-		reflect.Uint,
-		reflect.Int8,
-		reflect.Int16,
-		reflect.Int32,
-		reflect.Int64,
-		reflect.Int,
-		reflect.Float32,
-		reflect.Float64:
-		return "number"
-	case reflect.String:
-		return "string"
-	case reflect.Bool:
-		return "boolean"
-	}
-
-	// Falling through to use the native type.
-	nativeType := typ.String()
-	// Drop the package prefix.
-	if i := strings.IndexByte(nativeType, '.'); i > -1 {
-		nativeType = nativeType[i+1:]
-	}
-	return nativeType
 }
