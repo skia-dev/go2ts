@@ -19,6 +19,8 @@ func TestRender_ComplexStruct_Success(t *testing.T) {
 
 	type Mode string
 
+	type Offset int
+
 	type Direction string
 
 	const (
@@ -60,6 +62,7 @@ func TestRender_ComplexStruct_Success(t *testing.T) {
 		InlineStruct          struct{ A int }              `json:"inline"`
 		Array                 [3]string                    `json:"array"`
 		skipped               bool
+		Offset                Offset
 		Color                 color.Alpha
 		Direction             Direction
 	}
@@ -105,6 +108,7 @@ export interface ComplexStruct {
 	mode: Mode;
 	inline: Anonymous1;
 	array: string[];
+	Offset: Offset;
 	Color: Alpha;
 	Direction: Direction;
 }
@@ -112,6 +116,8 @@ export interface ComplexStruct {
 export type Data = { [key: string]: any };
 
 export type Mode = string;
+
+export type Offset = number;
 
 export type Direction = "up" | "down" | "left" | "right";
 `

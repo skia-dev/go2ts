@@ -174,7 +174,7 @@ func isPrimitive(kind reflect.Kind) bool {
 	return primitive[kind]
 }
 
-func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddType bool) *tsType {
+func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, isRecursive bool) *tsType {
 	var ret tsType
 	kind := reflectType.Kind()
 	if kind == reflect.Ptr {
@@ -189,7 +189,7 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddTyp
 	// primitive type, such as "type Donut string". In this case we need to add
 	// that type to all of our known types and return a reference to that type
 	// from here.
-	if !calledFromAddType && // Don't do this if called from addType().
+	if !isRecursive && // Don't do this if called from addType().
 		reflectType.Name() != "" && // Don't bother with anonymous structs.
 		!isTime(reflectType) && // Also skip time.Time.
 		(!isPrimitive(reflectType.Kind()) || // And either it's not a primitive Kind.
@@ -332,7 +332,7 @@ type tsType struct {
 	// typeName is the TypeScript type, such as "string", or "map", or "SomeInterfaceName".
 	typeName string
 
-	// keyType is the type of the key if this tsType is a map.
+	// keyType is the type of the key if this tsType is a map, such as "string" or "number".
 	keyType *tsType
 
 	// interfaceName is the name of the TypeScript interface if the tsType is
