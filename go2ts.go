@@ -24,7 +24,7 @@ type Go2TS struct {
 	anonymousCount int
 }
 
-// New returns a new *StructToTS.
+// New returns a new *GoToTS.
 func New() *Go2TS {
 	ret := &Go2TS{
 		seen: map[reflect.Type]string{},
@@ -96,7 +96,7 @@ func (g *Go2TS) Render(w io.Writer) error {
 	return nil
 }
 
-// The list if primitive Kinds that we support converting to TypeScript.
+// primitive is the list of Kinds that we support converting to TypeScript.
 var primitive = map[reflect.Kind]bool{
 	reflect.Bool:    true,
 	reflect.Int:     true,
@@ -119,7 +119,7 @@ func isPrimitive(kind reflect.Kind) bool {
 	return primitive[kind]
 }
 
-func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddType bool) *tsType {
+func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, isRecursive bool) *tsType {
 	var ret tsType
 	kind := reflectType.Kind()
 	if kind == reflect.Ptr {
@@ -130,13 +130,14 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddTyp
 
 	// As we build up the chain of tsTypes that fully describes a typeDefinition
 	// we may come across named types. For example: map[string]Donut, where
-	// Donut could be a "type Donut struct {...}", or a type based on a
-	// primitive type, such as "type Donut string". In this case we need to add
-	// that type to all of our known types and return a reference to that type
-	// from here.
-	if !calledFromAddType && // Don't do this if called from addType().
-		reflectType.Name() != "" && // Don't bother with anonymous structs.
-		!isTime(reflectType) && // Also skip time.Time.
+	// Donut could be "type Donut string". Without this path the Donut type
+	// doesn't get added and map[string]Donut just gets emitted as '{
+	// [key:string]: string}' and not '{ [key:string]: Donut}' In this case we
+	// need to add that type to all of our known types and return a reference to
+	// that type from here.
+	if !isRecursive && // Don't do this if called from addType().
+		reflectType.Name() != "" && // We only want this path for Kinds with a name.
+		!isTime(reflectType) && // Also skip time.Time, see AddWithName for explaination of time.Time handling.
 		(!isPrimitive(reflectType.Kind()) || // And either it's not a primitive Kind.
 			// Or it's case where a primitive Kind like string shows up with a type name.
 			(isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String())) {
@@ -206,12 +207,14 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, calledFromAddTyp
 		reflect.Chan,
 		reflect.Func,
 		reflect.UnsafePointer:
-		panic(fmt.Sprintf("Go kind %q can't be serialized to JSON.", kind))
+		panic(fmt.Sprintf("Go Kind %q cannot be serialized to JSON.", kind))
 	}
 	return &ret
 }
 
-func (g *Go2TS) addTypeFields(st *interfaceDefinition, reflectType reflect.Type) {
+// addInterfaceFields populates the fields of the given interfaceDefinition. It
+// assumes reflectType's Kind is Struct.
+func (g *Go2TS) addInterfaceFields(id *interfaceDefinition, reflectType reflect.Type) {
 	for i := 0; i < reflectType.NumField(); i++ {
 		structField := reflectType.Field(i)
 
@@ -222,7 +225,7 @@ func (g *Go2TS) addTypeFields(st *interfaceDefinition, reflectType reflect.Type)
 
 		field := newFieldDefinition(structField)
 		field.tsType = g.tsTypeFromReflectType(structField.Type, false)
-		st.Fields = append(st.Fields, field)
+		id.Fields = append(id.Fields, field)
 	}
 }
 
@@ -251,7 +254,7 @@ func (g *Go2TS) addType(reflectType reflect.Type, interfaceName string) (string,
 		}
 
 		g.seen[reflectType] = intf.Name
-		g.addTypeFields(&intf, reflectType)
+		g.addInterfaceFields(&intf, reflectType)
 		g.interfaces = append(g.interfaces, intf)
 		return intf.Name, nil
 	}
