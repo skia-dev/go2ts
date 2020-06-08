@@ -185,10 +185,11 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, isRecursive bool
 
 	// As we build up the chain of tsTypes that fully describes a typeDefinition
 	// we may come across named types. For example: map[string]Donut, where
-	// Donut could be a "type Donut struct {...}", or a type based on a
-	// primitive type, such as "type Donut string". In this case we need to add
-	// that type to all of our known types and return a reference to that type
-	// from here.
+	// Donut could be "type Donut string". Without this path the Donut type
+	// doesn't get added and map[string]Donut just gets emitted as
+	// '{[key:string]: string}' and not '{ [key:string]: Donut}' In this case we
+	// need to add that type to all of our known types and return a reference to
+	// that type from here.
 	if !isRecursive && // Don't do this if called from addType().
 		reflectType.Name() != "" && // We only want this path for Kinds with a name.
 		!isTime(reflectType) && // Also skip time.Time, see AddWithName for explaination of time.Time handling.
