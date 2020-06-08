@@ -1,5 +1,6 @@
-// Package go2ts is a module for generating TypeScript definitions from Go
-// structs.
+// Package go2ts is an extremely simple and powerful Go to Typescript generator.
+// It can handle all JSON serializable Go types and also has the ability to
+// define TypeScript union types for your enum-like types.
 package go2ts
 
 import (
@@ -11,54 +12,53 @@ import (
 	"strings"
 )
 
-// Go2TS writes TypeScript interface definitions for the given Go structs.
+// Go2TS writes TypeScript definitions for Go types.
 type Go2TS struct {
 	interfaces []interfaceDefinition
 	types      []typeDefinition
 
-	// seen maps from a reflect.Type that's already been seen to its TypeScript
-	// type name.
-	seen map[reflect.Type]string
+	// interfacesSeen maps reflect.Types to the name of their interface definition.
+	interfacesSeen map[reflect.Type]string
+
+	// typesSeen maps TypeScript type definition names that have already been added.
+	typesSeen map[string]bool
 
 	// anonymousCount keeps track of the number of anonymous structs we've had to name.
 	anonymousCount int
 }
 
-// New returns a new *GoToTS.
+// New returns a new *Go2TS.
 func New() *Go2TS {
 	ret := &Go2TS{
-		seen: map[reflect.Type]string{},
+		typesSeen:      map[string]bool{},
+		interfacesSeen: map[reflect.Type]string{},
 	}
 	return ret
 }
 
-// Add a struct that needs a TypeScript definition.
+// Add a type that needs a TypeScript definition.
 //
-// Just a wrapper for AddWithName with an interfaceName of "".
-//
-// See AddWithName.
+// See AddWithName() for more details.
 func (g *Go2TS) Add(v interface{}) error {
 	return g.AddWithName(v, "")
 }
 
-// AddWithName adds a struct that needs a TypeScript definition.
+// AddWithName adds a type that needs a TypeScript definition.
 //
-// The value passed in must resolve to a struct, a reflect.Type, or a
-// reflect.Value of a struct. That is, a string or number for v will cause
-// AddWithName to return an error, but a pointer to a struct is fine.
+// The value passed in can be an instance of a type, a reflect.Type, or a
+// reflect.Value.
 //
-// The 'name' supplied will be the TypeScript interface name.  If
-// 'interfaceName' is "" then the struct name will be used. If the struct is
-// anonymous it will be given a name of the form "AnonymousN".
+// The 'name' supplied will be the TypeScript interface name. If 'interfaceName'
+// is the empty string then the Go type name will be used. If the type is of a
+// struct that is anonymous it will be given a name of the form "AnonymousN".
 //
-// The fields of the struct will be named following the convention for json
-// serialization, including using the json tag if supplied.
-//
+// If the type is a struct, the fields of the struct will be named following the
+// convention for json serialization, including using the json tag if supplied.
 // Fields tagged with `json:",omitempty"` will have "| null" added to their
 // type.
 //
 // There is special handling of time.Time types to be TypeScript "string"s since
-// they implement MarshalJSON, see
+// time.Time implements MarshalJSON, see
 // https://pkg.go.dev/time?tab=doc#Time.MarshalJSON.
 func (g *Go2TS) AddWithName(v interface{}, interfaceName string) error {
 	var reflectType reflect.Type
@@ -73,6 +73,61 @@ func (g *Go2TS) AddWithName(v interface{}, interfaceName string) error {
 
 	_, err := g.addType(reflectType, interfaceName)
 	return err
+}
+
+// AddUnion adds a TypeScript definition for a union type of the values in 'v',
+// which must be a slice or an array.
+func (g *Go2TS) AddUnion(v interface{}) error {
+	return g.AddUnionWithName(v, "")
+}
+
+// AddUnionWithName adds a TypeScript definition for a union type of the values
+// in 'v', which must be a slice or an array.
+//
+// If typeName is the empty string then the name of type of elements in the
+// slice or array is used as the type name, otherwise the typeName supplied will
+// be used as the TypeScript type name.
+//
+func (g *Go2TS) AddUnionWithName(v interface{}, typeName string) error {
+	typ := reflect.TypeOf(v)
+	kind := typ.Kind()
+	if kind != reflect.Slice && kind != reflect.Array {
+		return fmt.Errorf("AddUnionWithName must be supplied an array or slice, got %v: %v", kind, v)
+	}
+	if typeName == "" {
+		typeName = typ.Elem().Name()
+	}
+	values := reflect.ValueOf(v)
+	valuesAsStrings := make([]string, values.Len())
+	for i := range valuesAsStrings {
+		value := values.Index(i)
+		if value.Kind() == reflect.String {
+			valuesAsStrings[i] = fmt.Sprintf("%q", values.Index(i).Interface())
+		} else {
+			valuesAsStrings[i] = fmt.Sprintf("%v", values.Index(i).Interface())
+		}
+	}
+	unionDefinition := strings.Join(valuesAsStrings, " | ")
+	td := typeDefinition{
+		name: typeName,
+		tsType: &tsType{
+			typeName: unionDefinition,
+		},
+	}
+	if g.typesSeen[typeName] {
+		// A union type is always going to be more specific than the type
+		// definition found when building an interface, so overwrite the
+		// existing definition.
+		for i, t := range g.types {
+			if t.name == typeName {
+				g.types[i] = td
+			}
+		}
+		return nil
+	}
+	g.typesSeen[typeName] = true
+	g.types = append(g.types, td)
+	return nil
 }
 
 // Render the TypeScript definitions to the given io.Writer.
@@ -131,8 +186,8 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, isRecursive bool
 	// As we build up the chain of tsTypes that fully describes a typeDefinition
 	// we may come across named types. For example: map[string]Donut, where
 	// Donut could be "type Donut string". Without this path the Donut type
-	// doesn't get added and map[string]Donut just gets emitted as '{
-	// [key:string]: string}' and not '{ [key:string]: Donut}' In this case we
+	// doesn't get added and map[string]Donut just gets emitted as
+	// '{[key:string]: string}' and not '{ [key:string]: Donut}' In this case we
 	// need to add that type to all of our known types and return a reference to
 	// that type from here.
 	if !isRecursive && // Don't do this if called from addType().
@@ -236,10 +291,9 @@ func (g *Go2TS) getAnonymousInterfaceName() string {
 
 func (g *Go2TS) addType(reflectType reflect.Type, interfaceName string) (string, error) {
 	reflectType = removeIndirection(reflectType)
-	if tsTypeName, ok := g.seen[reflectType]; ok {
+	if tsTypeName, ok := g.interfacesSeen[reflectType]; ok {
 		return tsTypeName, nil
 	}
-
 	if reflectType.Kind() == reflect.Struct {
 		if interfaceName == "" {
 			interfaceName = strings.Title(reflectType.Name())
@@ -253,7 +307,7 @@ func (g *Go2TS) addType(reflectType reflect.Type, interfaceName string) (string,
 			Fields: make([]fieldDefinition, 0, reflectType.NumField()),
 		}
 
-		g.seen[reflectType] = intf.Name
+		g.interfacesSeen[reflectType] = intf.Name
 		g.addInterfaceFields(&intf, reflectType)
 		g.interfaces = append(g.interfaces, intf)
 		return intf.Name, nil
@@ -265,7 +319,10 @@ func (g *Go2TS) addType(reflectType reflect.Type, interfaceName string) (string,
 		typeDefinition.name = interfaceName
 	}
 	typeDefinition.tsType = g.tsTypeFromReflectType(reflectType, true)
-	g.seen[reflectType] = typeDefinition.name
+	if g.typesSeen[typeDefinition.name] {
+		return typeDefinition.name, nil
+	}
+	g.typesSeen[typeDefinition.name] = true
 	g.types = append(g.types, typeDefinition)
 	return typeDefinition.name, nil
 }
