@@ -190,8 +190,8 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, isRecursive bool
 	// that type to all of our known types and return a reference to that type
 	// from here.
 	if !isRecursive && // Don't do this if called from addType().
-		reflectType.Name() != "" && // Don't bother with anonymous structs.
-		!isTime(reflectType) && // Also skip time.Time.
+		reflectType.Name() != "" && // We only want this path for Kinds with a name.
+		!isTime(reflectType) && // Also skip time.Time, see AddWithName for explaination of time.Time handling.
 		(!isPrimitive(reflectType.Kind()) || // And either it's not a primitive Kind.
 			// Or it's case where a primitive Kind like string shows up with a type name.
 			(isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String())) {
