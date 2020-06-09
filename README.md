@@ -28,7 +28,7 @@ import (
 	"github.com/skia-dev/go2ts"
 )
 
-func Example() {
+func main() {
 	type Direction string
 
 	const (
@@ -55,6 +55,7 @@ func Example() {
 	generator.Add(Turtle{})
 	generator.AddUnion(AllDirections)
 	generator.Render(os.Stdout)
+}
 ```
 
 Output:
