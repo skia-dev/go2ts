@@ -278,7 +278,10 @@ func (g *Go2TS) addInterfaceFields(id *interfaceDefinition, reflectType reflect.
 			continue
 		}
 
-		field := newFieldDefinition(structField)
+		field, ok := newFieldDefinition(structField)
+		if !ok {
+			continue
+		}
 		field.tsType = g.tsTypeFromReflectType(structField.Type, false)
 		id.Fields = append(id.Fields, field)
 	}
@@ -401,7 +404,9 @@ func (f fieldDefinition) String() string {
 }
 
 // newFieldDefinition creates a new fieldDefinition from the given reflect.StructField.
-func newFieldDefinition(structField reflect.StructField) fieldDefinition {
+//
+// If the bool returned is false then the field is not exported to JSON.
+func newFieldDefinition(structField reflect.StructField) (fieldDefinition, bool) {
 	var ret fieldDefinition
 	jsonTag := strings.Split(structField.Tag.Get("json"), ",")
 
@@ -409,8 +414,11 @@ func newFieldDefinition(structField reflect.StructField) fieldDefinition {
 	if len(jsonTag) > 0 && jsonTag[0] != "" {
 		ret.name = jsonTag[0]
 	}
+	if ret.name == "-" {
+		return ret, false
+	}
 	ret.isOptional = len(jsonTag) > 1 && jsonTag[1] == "omitempty"
-	return ret
+	return ret, true
 }
 
 func isTime(t reflect.Type) bool {
