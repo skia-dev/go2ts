@@ -51,6 +51,8 @@ func TestRender_ComplexStruct_Success(t *testing.T) {
 		DataPtr               *Data                        `json:"dp"`
 		MapStringSlice        map[string][]*string         `json:"mss"`
 		MapIntKeys            map[int]string               `json:"mik"`
+		MapStringAliasKeys    map[Mode]string              `json:"msak"`
+		MapIntAliasKeys       map[Offset]string            `json:"miak"`
 		MapOtherStruct        map[string]OtherStruct       `json:"mos"`
 		Slice                 []string                     `json:"slice"`
 		SliceOfSlice          [][]string                   `json:"sos"`
@@ -99,6 +101,8 @@ export interface ComplexStruct {
 	dp: Data | null;
 	mss: { [key: string]: string[] };
 	mik: { [key: number]: string };
+	msak: { [key: string]: string };
+	miak: { [key: number]: string };
 	mos: { [key: string]: OtherStruct };
 	slice: string[] | null;
 	sos: string[][] | null;

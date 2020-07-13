@@ -151,9 +151,8 @@ func (g *Go2TS) Render(w io.Writer) error {
 	return nil
 }
 
-// primitive is the list of Kinds that we support converting to TypeScript.
-var primitive = map[reflect.Kind]bool{
-	reflect.Bool:    true,
+// numbers is the set of Kinds that we convert into the TypeScript "number" type.
+var numberKinds = map[reflect.Kind]bool{
 	reflect.Int:     true,
 	reflect.Int8:    true,
 	reflect.Int16:   true,
@@ -164,14 +163,23 @@ var primitive = map[reflect.Kind]bool{
 	reflect.Uint16:  true,
 	reflect.Uint32:  true,
 	reflect.Uint64:  true,
-	reflect.Uintptr: true,
 	reflect.Float32: true,
 	reflect.Float64: true,
+}
+
+func isNumber(kind reflect.Kind) bool {
+	return numberKinds[kind]
+}
+
+// nonNumberPrimitiveKinds is the non-number set of Kinds that we support converting to TypeScript.
+var nonNumberPrimitiveKinds = map[reflect.Kind]bool{
+	reflect.Bool:    true,
+	reflect.Uintptr: true,
 	reflect.String:  true,
 }
 
 func isPrimitive(kind reflect.Kind) bool {
-	return primitive[kind]
+	return numberKinds[kind] || nonNumberPrimitiveKinds[kind]
 }
 
 func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, isRecursive bool) *tsType {
@@ -187,12 +195,12 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, isRecursive bool
 	// we may come across named types. For example: map[string]Donut, where
 	// Donut could be "type Donut string". Without this path the Donut type
 	// doesn't get added and map[string]Donut just gets emitted as
-	// '{[key:string]: string}' and not '{ [key:string]: Donut}' In this case we
+	// '{ [key:string]: string }' and not '{ [key:string]: Donut }' In this case we
 	// need to add that type to all of our known types and return a reference to
 	// that type from here.
 	if !isRecursive && // Don't do this if called from addType().
 		reflectType.Name() != "" && // We only want this path for Kinds with a name.
-		!isTime(reflectType) && // Also skip time.Time, see AddWithName for explaination of time.Time handling.
+		!isTime(reflectType) && // Also skip time.Time, see AddWithName for explanation of time.Time handling.
 		(!isPrimitive(reflectType.Kind()) || // And either it's not a primitive Kind.
 			// Or it's case where a primitive Kind like string shows up with a type name.
 			(isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String())) {
@@ -237,7 +245,28 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, isRecursive bool
 
 	case reflect.Map:
 		ret.typeName = "map"
-		ret.keyType = g.tsTypeFromReflectType(reflectType.Key(), false)
+
+		// TypeScript index signature parameter types[1] must be either "string" or "number", and cannot
+		// be type aliases, otherwise the TypeScript compiler will fail with error
+		// "TS1336: An index signature parameter type cannot be a type alias.".
+		//
+		// Example:
+		//
+		//   export type Foo = string;
+		//   export type Bar = { [key: Foo]: string };  // Compiler produces error TS1336.
+		//
+		// Thus, we treat map keys as a special case where we ignore any type aliases and use either
+		// "string" or "number" directly.
+		//
+		// [1] https://www.typescriptlang.org/docs/handbook/advanced-types.html#index-types-and-index-signatures.
+		if reflectType.Key().Kind() == reflect.String {
+			ret.keyType = &tsType{typeName: "string"}
+		} else if isNumber(reflectType.Key().Kind()) {
+			ret.keyType = &tsType{typeName: "number"}
+		} else {
+			panic(fmt.Sprintf("Go Kind %q cannot be used as a TypeScript index signature parameter type.", reflectType.Key().Kind()))
+		}
+
 		ret.subType = g.tsTypeFromReflectType(reflectType.Elem(), false)
 
 	case reflect.Slice, reflect.Array:
