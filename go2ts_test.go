@@ -30,7 +30,7 @@ func TestRender_ComplexStruct_Success(t *testing.T) {
 		Right Direction = "right"
 	)
 
-	var AllDirections []Direction = []Direction{Up, Down, Left, Right}
+	var AllDirections = []Direction{Up, Down, Left, Right}
 
 	type Data map[string]interface{}
 
@@ -49,9 +49,12 @@ func TestRender_ComplexStruct_Success(t *testing.T) {
 		OptionalOther         *OtherStruct                 `json:"oe,omitempty"`
 		Data                  Data                         `json:"d"`
 		DataPtr               *Data                        `json:"dp"`
-		MapStringSlice        map[string][]*string         `json:"mss"`
+		MapStringSlice        map[string][]string          `json:"mss"`
+		MapStringSliceSlice   map[string][][]string        `json:"msss"`
+		MapStringPtrSlice     map[string][]*string         `json:"msps"`
 		MapIntKeys            map[int]string               `json:"mik"`
 		MapOtherStruct        map[string]OtherStruct       `json:"mos"`
+		MapOtherStructPtr     map[string]*OtherStruct      `json:"mosp"`
 		Slice                 []string                     `json:"slice"`
 		SliceOfSlice          [][]string                   `json:"sos"`
 		SliceOfData           []Data                       `json:"sod"`
@@ -97,15 +100,18 @@ export interface ComplexStruct {
 	oe?: OtherStruct | null;
 	d: Data;
 	dp: Data | null;
-	mss: { [key: string]: string[] };
+	mss: { [key: string]: string[] | null };
+	msss: { [key: string]: (string[] | null)[] | null };
+	msps: { [key: string]: (string | null)[] | null };
 	mik: { [key: number]: string };
 	mos: { [key: string]: OtherStruct };
+	mosp: { [key: string]: OtherStruct | null };
 	slice: string[] | null;
-	sos: string[][] | null;
+	sos: (string[] | null)[] | null;
 	sod: Data[] | null;
 	mod: { [key: string]: Data };
-	mosod: { [key: string]: Data[] };
-	momosod: { [key: string]: { [key: string]: Data[] } };
+	mosod: { [key: string]: Data[] | null };
+	momosod: { [key: string]: { [key: string]: Data[] | null } };
 	mode: Mode;
 	inline: Anonymous1;
 	array: string[];
