@@ -381,7 +381,12 @@ func (s tsType) String() string {
 	var ret string
 	switch s.typeName {
 	case "array":
-		ret = s.subType.String() + "[]"
+		if s.subType.canBeNull {
+			// We add parentheses if the type can be null. We want "(X | null)[]", not "X | null[]".
+			ret = fmt.Sprintf("(%s)[]", s.subType.String())
+		} else {
+			ret = s.subType.String() + "[]"
+		}
 	case "map":
 		ret = fmt.Sprintf("{ [key: %s]: %s }", s.keyType.String(), s.subType.String())
 	case "interface":
@@ -390,6 +395,9 @@ func (s tsType) String() string {
 		ret = s.typeName
 	}
 
+	if s.canBeNull {
+		return fmt.Sprintf("%s | null", ret)
+	}
 	return ret
 }
 
@@ -424,12 +432,7 @@ func (f fieldDefinition) String() string {
 		optional = "?"
 	}
 
-	canBeNull := ""
-	if f.tsType.canBeNull {
-		canBeNull = " | null"
-	}
-
-	return fmt.Sprintf("\t%s%s: %s%s;", f.name, optional, f.tsType.String(), canBeNull)
+	return fmt.Sprintf("\t%s%s: %s;", f.name, optional, f.tsType.String())
 }
 
 // newFieldDefinition creates a new fieldDefinition from the given reflect.StructField.
