@@ -296,9 +296,10 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, isRecursive bool
 	return &ret
 }
 
-// addInterfaceFields populates the fields of the given interfaceDefinition. It
-// assumes reflectType's Kind is Struct.
-func (g *Go2TS) addInterfaceFields(id *interfaceDefinition, reflectType reflect.Type) {
+// addInterfaceFields recursively populates the fields of the given interfaceDefinition. It assumes
+// reflectType's Kind is Struct. If recursivelyForceOptional is true, any fields populated on this
+// or any recursive calls to this method will be marked as optional.
+func (g *Go2TS) addInterfaceFields(id *interfaceDefinition, reflectType reflect.Type, recursivelyForceOptional bool) {
 	for i := 0; i < reflectType.NumField(); i++ {
 		structField := reflectType.Field(i)
 
@@ -307,11 +308,32 @@ func (g *Go2TS) addInterfaceFields(id *interfaceDefinition, reflectType reflect.
 			continue
 		}
 
+		// If the field is an embedded struct, or an embedded struct pointer, we add the inner struct's
+		// fields to the outer struct (i.e. we flatten the structs). This is consistent with
+		// json.Marshal().
+		if structField.Anonymous && removeIndirection(structField.Type).Kind() == reflect.Struct {
+			// If the field is an embedded struct pointer, we recursively mark all its fields as optional.
+			// This is because json.Marshal() will omit said fields if the embedded struct pointer is nil.
+			g.addInterfaceFields(id, removeIndirection(structField.Type), recursivelyForceOptional || structField.Type.Kind() == reflect.Ptr)
+			continue
+		}
+
 		field, ok := newFieldDefinition(structField)
 		if !ok {
 			continue
 		}
 		field.tsType = g.tsTypeFromReflectType(structField.Type, false)
+		field.isOptional = field.isOptional || recursivelyForceOptional
+
+		// If a field in an embedded struct has the same name as a field in the outer struct, the
+		// outermost field will take precendence in the output of json.Marshal(). However, this opaque
+		// behavior is probably not what the programmer intended, so we fail loudly to prevent bugs.
+		for _, existingField := range id.Fields {
+			if field.name == existingField.name {
+				panic(fmt.Sprintf("Attempted to populate interface %q with more than one field named %q. (Did you embed two structs with overlapping field names?)", id.Name, field.name))
+			}
+		}
+
 		id.Fields = append(id.Fields, field)
 	}
 }
@@ -340,7 +362,7 @@ func (g *Go2TS) addType(reflectType reflect.Type, interfaceName string) (string,
 		}
 
 		g.interfacesSeen[reflectType] = intf.Name
-		g.addInterfaceFields(&intf, reflectType)
+		g.addInterfaceFields(&intf, reflectType, false /* =recursivelyForceOptional */)
 		g.interfaces = append(g.interfaces, intf)
 		return intf.Name, nil
 	}
