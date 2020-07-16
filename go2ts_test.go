@@ -17,6 +17,30 @@ func TestRender_ComplexStruct_Success(t *testing.T) {
 		T time.Time `json:"t,omitempty"`
 	}
 
+	type InnermostStruct struct {
+		InnermostField string
+	}
+
+	type StructWithEmbeddedStruct struct {
+		InnermostStruct
+		Field string
+	}
+
+	type StructWithEmbeddedStructPtr struct {
+		*InnermostStruct
+		Field string
+	}
+
+	type AnotherInnermostStruct struct {
+		AnotherInnermostField string
+	}
+
+	type MultilevelEmbeddedStruct struct {
+		*StructWithEmbeddedStruct
+		AnotherInnermostStruct
+		OutermostField string
+	}
+
 	type Mode string
 
 	type Offset int
@@ -43,6 +67,9 @@ func TestRender_ComplexStruct_Success(t *testing.T) {
 		Time                   time.Time
 		Other                  OtherStruct
 		OtherPtr               *OtherStruct
+		WithEmbeddedStruct     StructWithEmbeddedStruct
+		WithEmbeddedStructPtr  StructWithEmbeddedStructPtr
+		MultilevelEmbedded     MultilevelEmbeddedStruct
 		OptionalString         string       `json:",omitempty"`
 		OptionalInt            int          `json:",omitempty"`
 		OptionalFloat64        float64      `json:",omitempty"`
@@ -81,6 +108,23 @@ export interface OtherStruct {
 	t?: string;
 }
 
+export interface StructWithEmbeddedStruct {
+	InnermostField: string;
+	Field: string;
+}
+
+export interface StructWithEmbeddedStructPtr {
+	InnermostField?: string;
+	Field: string;
+}
+
+export interface MultilevelEmbeddedStruct {
+	InnermostField?: string;
+	Field?: string;
+	AnotherInnermostField: string;
+	OutermostField: string;
+}
+
 export interface Anonymous1 {
 	A: number;
 }
@@ -98,6 +142,9 @@ export interface ComplexStruct {
 	Time: string;
 	Other: OtherStruct;
 	OtherPtr: OtherStruct | null;
+	WithEmbeddedStruct: StructWithEmbeddedStruct;
+	WithEmbeddedStructPtr: StructWithEmbeddedStructPtr;
+	MultilevelEmbedded: MultilevelEmbeddedStruct;
 	OptionalString?: string;
 	OptionalInt?: number;
 	OptionalFloat64?: number;
@@ -253,6 +300,29 @@ func TestAdd_UnsupportedType_Panic(t *testing.T) {
 
 	go2ts := New()
 	err := go2ts.Add(HasUnsupportedFieldTypes{})
+	require.NoError(t, err)
+}
+
+func TestAdd_EmbeddedStructsWithOverlappingFieldNames_Panic(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			assert.Fail(t, "Embedded structs with overlapping field names is unsupported and should panic.")
+		}
+		require.Equal(t, `Attempted to populate interface "Outer" with more than one field named "F". (Did you embed two structs with overlapping field names?)`, r)
+	}()
+
+	type Inner struct {
+		F string
+	}
+
+	type Outer struct {
+		Inner
+		F string
+	}
+
+	go2ts := New()
+	err := go2ts.Add(Outer{})
 	require.NoError(t, err)
 }
 
