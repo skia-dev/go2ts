@@ -48,7 +48,7 @@ func (g *Go2TS) Add(v interface{}) error {
 // Will stop at the first type that fails.
 func (g *Go2TS) AddMultiple(values ...interface{}) error {
 	for _, v := range values {
-		if err := g.AddWithName(v, ""); err != nil {
+		if err := g.Add(v); err != nil {
 			return err
 		}
 	}
