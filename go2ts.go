@@ -43,6 +43,18 @@ func (g *Go2TS) Add(v interface{}) error {
 	return g.AddWithName(v, "")
 }
 
+// AddMultiple types in a single call.
+//
+// Will stop at the first type that fails.
+func (g *Go2TS) AddMultiple(values ...interface{}) error {
+	for _, v := range values {
+		if err := g.AddWithName(v, ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // AddWithName adds a type that needs a TypeScript definition.
 //
 // The value passed in can be an instance of a type, a reflect.Type, or a
@@ -79,6 +91,18 @@ func (g *Go2TS) AddWithName(v interface{}, interfaceName string) error {
 // which must be a slice or an array.
 func (g *Go2TS) AddUnion(v interface{}) error {
 	return g.AddUnionWithName(v, "")
+}
+
+// AddMultipleUnion adds multple union types.
+//
+// Will stop at the first union type that fails.
+func (g *Go2TS) AddMultipleUnion(values ...interface{}) error {
+	for _, v := range values {
+		if err := g.AddUnion(v); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // AddUnionWithName adds a TypeScript definition for a union type of the values
