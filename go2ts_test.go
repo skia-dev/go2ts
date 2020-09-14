@@ -284,7 +284,6 @@ export interface AnotherStruct {
 }
 
 func TestRender_AddMultipleEmpty_Success(t *testing.T) {
-
 	go2ts := New()
 	err := go2ts.AddMultiple()
 	require.NoError(t, err)

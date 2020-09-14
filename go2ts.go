@@ -43,7 +43,7 @@ func (g *Go2TS) Add(v interface{}) error {
 	return g.AddWithName(v, "")
 }
 
-// AddMultiple types in a single call.
+// AddMultiple adds multiple types in a single call.
 //
 // Will stop at the first type that fails.
 func (g *Go2TS) AddMultiple(values ...interface{}) error {
