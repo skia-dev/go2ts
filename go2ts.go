@@ -49,17 +49,31 @@ func (g *Go2TS) getOrSaveTypeDeclaration(reflectType reflect.Type, typeDeclarati
 
 // Add a type that needs a TypeScript definition.
 //
-// See AddWithName() for more details.
+// See AddToNamespace() for more details.
 func (g *Go2TS) Add(v interface{}) error {
-	return g.AddWithName(v, "")
+	return g.AddToNamespace(v, "")
+}
+
+// AddToNamespace adds a type that needs a TypeScript definition to the given TypeScript namespace.
+//
+// See AddWithNameToNamespace() for more details.
+func (g *Go2TS) AddToNamespace(v interface{}, namespace string) error {
+	return g.AddWithNameToNamespace(v, "", namespace)
 }
 
 // AddMultiple adds multiple types in a single call.
 //
-// Will stop at the first type that fails.
+// See AddMultipleToNamespace() for more details.
 func (g *Go2TS) AddMultiple(values ...interface{}) error {
+	return g.AddMultipleToNamespace("", values...)
+}
+
+// AddMultipleToNamespace adds multiple types to the given TypeScript namespace in a single call.
+//
+// Will stop at the first type that fails.
+func (g *Go2TS) AddMultipleToNamespace(namespace string, values ...interface{}) error {
 	for _, v := range values {
-		if err := g.Add(v); err != nil {
+		if err := g.AddToNamespace(v, namespace); err != nil {
 			return err
 		}
 	}
@@ -67,6 +81,13 @@ func (g *Go2TS) AddMultiple(values ...interface{}) error {
 }
 
 // AddWithName adds a type that needs a TypeScript definition.
+//
+// See AddWithNameToNamespace() for more details.
+func (g *Go2TS) AddWithName(v interface{}, interfaceName string) error {
+	return g.AddWithNameToNamespace(v, interfaceName, "")
+}
+
+// AddWithNameToNamespace adds a type that needs a TypeScript definition.
 //
 // The value passed in can be an instance of a type, a reflect.Type, or a
 // reflect.Value.
@@ -83,7 +104,10 @@ func (g *Go2TS) AddMultiple(values ...interface{}) error {
 // There is special handling of time.Time types to be TypeScript "string"s since
 // time.Time implements MarshalJSON, see
 // https://pkg.go.dev/time?tab=doc#Time.MarshalJSON.
-func (g *Go2TS) AddWithName(v interface{}, interfaceName string) error {
+//
+// If namespace is non-empty, the type will be added inside a TypeScript
+// namespace of that name.
+func (g *Go2TS) AddWithNameToNamespace(v interface{}, interfaceName, namespace string) error {
 	var reflectType reflect.Type
 	switch v := v.(type) {
 	case reflect.Type:
@@ -94,22 +118,39 @@ func (g *Go2TS) AddWithName(v interface{}, interfaceName string) error {
 		reflectType = reflect.TypeOf(v)
 	}
 
-	g.addTypeDeclaration(reflectType, interfaceName)
+	g.addTypeDeclaration(reflectType, interfaceName, namespace)
 	return nil
 }
 
 // AddUnion adds a TypeScript definition for a union type of the values in 'v',
 // which must be a slice or an array.
+//
+// See AddUnionToNamespace() for more details.
 func (g *Go2TS) AddUnion(v interface{}) error {
-	return g.AddUnionWithName(v, "")
+	return g.AddUnionToNamespace(v, "")
+}
+
+// AddUnionToNamespace adds a TypeScript definition for a union type of the values in 'v',
+// which must be a slice or an array, to the given TypeScript namespace.
+//
+// See AddUnionWithNameToNamespace() for more details.
+func (g *Go2TS) AddUnionToNamespace(v interface{}, namespace string) error {
+	return g.AddUnionWithNameToNamespace(v, "", namespace)
 }
 
 // AddMultipleUnion adds multple union types.
 //
-// Will stop at the first union type that fails.
+// See AddMultipleUnionToNamespace() for more details.
 func (g *Go2TS) AddMultipleUnion(values ...interface{}) error {
+	return g.AddMultipleUnionToNamespace("", values...)
+}
+
+// AddMultipleUnionToNamespace adds multple union types to the given TypeScript namespace.
+//
+// Will stop at the first union type that fails.
+func (g *Go2TS) AddMultipleUnionToNamespace(namespace string, values ...interface{}) error {
 	for _, v := range values {
-		if err := g.AddUnion(v); err != nil {
+		if err := g.AddUnionToNamespace(v, namespace); err != nil {
 			return err
 		}
 	}
@@ -119,11 +160,19 @@ func (g *Go2TS) AddMultipleUnion(values ...interface{}) error {
 // AddUnionWithName adds a TypeScript definition for a union type of the values
 // in 'v', which must be a slice or an array.
 //
+// See AddUnionWithNameToNamespace() for more details.
+//
+func (g *Go2TS) AddUnionWithName(v interface{}, typeName string) error {
+	return g.AddUnionWithNameToNamespace(v, typeName, "")
+}
+
+// AddUnionWithNameToNamespace adds a TypeScript definition for a union type of
+// the values in 'v', which must be a slice or an array, to the given namespace.
+//
 // If typeName is the empty string then the name of type of elements in the
 // slice or array is used as the type name, otherwise the typeName supplied will
 // be used as the TypeScript type name.
-//
-func (g *Go2TS) AddUnionWithName(v interface{}, typeName string) error {
+func (g *Go2TS) AddUnionWithNameToNamespace(v interface{}, typeName, namespace string) error {
 	// We can only build union types from Go slices or arrays.
 	reflectType := reflect.TypeOf(v)
 	if reflectType.Kind() != reflect.Slice && reflectType.Kind() != reflect.Array {
@@ -173,11 +222,13 @@ func (g *Go2TS) AddUnionWithName(v interface{}, typeName string) error {
 		if !ok {
 			return fmt.Errorf("Go type %v was already added as something other than a TypeScript type alias.", reflectType.Elem())
 		}
+		existingTypeAliasDeclaration.Namespace = namespace
 		existingTypeAliasDeclaration.Identifier = typeName
 		existingTypeAliasDeclaration.Type = unionType
 	} else {
 		// The reflect.Type hasn't been seen before, so we declare a new type alias for the union type.
 		g.getOrSaveTypeDeclaration(reflectType.Elem(), &typescript.TypeAliasDeclaration{
+			Namespace:  namespace,
 			Identifier: typeName,
 			Type:       unionType,
 		})
@@ -249,11 +300,11 @@ func isPrimitiveAlias(reflectType reflect.Type) bool {
 	return isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String()
 }
 
-func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, wasExplicitlyAdded bool) typescript.Type {
+func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, namespace string, wasExplicitlyAdded bool) typescript.Type {
 	// If the type is a pointer, then we remove the pointer indirection, compute the resulting
 	// TypeScript type, and return the union between that type and null.
 	if reflectType.Kind() == reflect.Ptr {
-		tsType := g.reflectTypeToTypeScriptType(removeIndirection(reflectType), wasExplicitlyAdded)
+		tsType := g.reflectTypeToTypeScriptType(removeIndirection(reflectType), namespace, wasExplicitlyAdded)
 		return &typescript.UnionType{
 			Types: []typescript.Type{tsType, typescript.Null},
 		}
@@ -266,7 +317,7 @@ func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, wasExplici
 
 	// Structs are declared as interfaces (save for time.Time, which is a special case handled below).
 	if reflectType.Kind() == reflect.Struct && !isTime(reflectType) {
-		return g.addInterfaceDeclaration(reflectType, "").TypeReference()
+		return g.addInterfaceDeclaration(reflectType, "", namespace).TypeReference()
 	}
 
 	// Will hold the typescript.Type extracted from the reflect.Type.
@@ -319,12 +370,12 @@ func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, wasExplici
 
 		tsType = &typescript.MapType{
 			IndexType: indexType,
-			ValueType: g.reflectTypeToTypeScriptType(reflectType.Elem(), false /* =wasExplicitlyAdded */),
+			ValueType: g.reflectTypeToTypeScriptType(reflectType.Elem(), namespace, false /* =wasExplicitlyAdded */),
 		}
 
 	case reflect.Slice, reflect.Array:
 		tsType = &typescript.ArrayType{
-			ItemsType: g.reflectTypeToTypeScriptType(reflectType.Elem(), false /* =wasExplicitlyAdded */),
+			ItemsType: g.reflectTypeToTypeScriptType(reflectType.Elem(), namespace, false /* =wasExplicitlyAdded */),
 		}
 		// Slices can be nil, but not arrays.
 		if reflectType.Kind() == reflect.Slice {
@@ -363,6 +414,7 @@ func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, wasExplici
 		// We don't want an alias for time.Time because we treat it as a string in TypeScript.
 		!isTime(reflectType) {
 		typeDeclaration := &typescript.TypeAliasDeclaration{
+			Namespace:  namespace,
 			Identifier: reflectType.Name(),
 			Type:       tsType,
 		}
@@ -424,7 +476,7 @@ func (g *Go2TS) populateInterfaceDeclarationProperties(interfaceDeclaration *typ
 		}
 
 		// Recursively compute the property's TypeScript type.
-		propertyType := g.reflectTypeToTypeScriptType(structField.Type, false /* =wasExplicitlyAdded */)
+		propertyType := g.reflectTypeToTypeScriptType(structField.Type, interfaceDeclaration.Namespace, false /* =wasExplicitlyAdded */)
 
 		// We mark the property as optional if the field is tagged with "omitempty".
 		markedAsOptional := len(jsonTag) > 1 && jsonTag[1] == "omitempty"
@@ -444,7 +496,7 @@ func (g *Go2TS) getAnonymousInterfaceName() string {
 	return fmt.Sprintf("Anonymous%d", g.anonymousCount)
 }
 
-func (g *Go2TS) addInterfaceDeclaration(structType reflect.Type, interfaceName string) *typescript.InterfaceDeclaration {
+func (g *Go2TS) addInterfaceDeclaration(structType reflect.Type, interfaceName, namespace string) *typescript.InterfaceDeclaration {
 	structType = removeIndirection(structType)
 
 	// Only structs can be declared as TypeScript interfaces.
@@ -468,6 +520,7 @@ func (g *Go2TS) addInterfaceDeclaration(structType reflect.Type, interfaceName s
 	// Create the interface declaration and populate its fields, which recurses into any embedded
 	// structs.
 	interfaceDeclaration := &typescript.InterfaceDeclaration{
+		Namespace:  namespace,
 		Identifier: interfaceName,
 		Properties: []typescript.PropertySignature{},
 	}
@@ -479,10 +532,10 @@ func (g *Go2TS) addInterfaceDeclaration(structType reflect.Type, interfaceName s
 	return interfaceDeclaration
 }
 
-func (g *Go2TS) addTypeDeclaration(reflectType reflect.Type, typeName string) {
+func (g *Go2TS) addTypeDeclaration(reflectType reflect.Type, typeName, namespace string) {
 	// Struct types are declared as TypeScript interfaces.
 	if removeIndirection(reflectType).Kind() == reflect.Struct {
-		g.addInterfaceDeclaration(reflectType, typeName)
+		g.addInterfaceDeclaration(reflectType, typeName, namespace)
 		return
 	}
 
@@ -496,8 +549,9 @@ func (g *Go2TS) addTypeDeclaration(reflectType reflect.Type, typeName string) {
 		typeName = reflectType.Name()
 	}
 	typeDeclaration := &typescript.TypeAliasDeclaration{
+		Namespace:  namespace,
 		Identifier: typeName,
-		Type:       g.reflectTypeToTypeScriptType(reflectType, true /* =wasExplicitlyAdded */),
+		Type:       g.reflectTypeToTypeScriptType(reflectType, namespace, true /* =wasExplicitlyAdded */),
 	}
 
 	g.getOrSaveTypeDeclaration(reflectType, typeDeclaration)
