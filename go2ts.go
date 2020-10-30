@@ -1,4 +1,4 @@
-// Package go2ts is an extremely simple and powerful Go to Typescript generator.
+// Package go2ts is an extremely simple and powerful Go to TypeScript generator.
 // It can handle all JSON serializable Go types and also has the ability to
 // define TypeScript union types for your enum-like types.
 package go2ts
@@ -6,22 +6,23 @@ package go2ts
 import (
 	"fmt"
 	"go/ast"
-	"html/template"
 	"io"
 	"reflect"
 	"strings"
+
+	"github.com/skia-dev/go2ts/typescript"
 )
 
 // Go2TS writes TypeScript definitions for Go types.
 type Go2TS struct {
-	interfaces []interfaceDefinition
-	types      []typeDefinition
+	// typeDeclarations maps any added reflect.Types to their corresponding TypeScript type
+	// declarations.
+	typeDeclarations map[reflect.Type]typescript.TypeDeclaration
 
-	// interfacesSeen maps reflect.Types to the name of their interface definition.
-	interfacesSeen map[reflect.Type]string
-
-	// typesSeen maps TypeScript type definition names that have already been added.
-	typesSeen map[string]bool
+	// typeDeclarationsInOrder holds type declarations in the order they were added, which determines
+	// the order they will appear in the output TypeScript code. This field and typeDeclarations
+	// should be kept in sync.
+	typeDeclarationsInOrder []typescript.TypeDeclaration
 
 	// anonymousCount keeps track of the number of anonymous structs we've had to name.
 	anonymousCount int
@@ -30,10 +31,20 @@ type Go2TS struct {
 // New returns a new *Go2TS.
 func New() *Go2TS {
 	ret := &Go2TS{
-		typesSeen:      map[string]bool{},
-		interfacesSeen: map[reflect.Type]string{},
+		typeDeclarations:        map[reflect.Type]typescript.TypeDeclaration{},
+		typeDeclarationsInOrder: []typescript.TypeDeclaration{},
 	}
 	return ret
+}
+
+func (g *Go2TS) getOrSaveTypeDeclaration(reflectType reflect.Type, typeDeclaration typescript.TypeDeclaration) typescript.TypeDeclaration {
+	if existingTypeDeclaration, ok := g.typeDeclarations[reflectType]; ok {
+		return existingTypeDeclaration
+	} else {
+		g.typeDeclarations[reflectType] = typeDeclaration
+		g.typeDeclarationsInOrder = append(g.typeDeclarationsInOrder, typeDeclaration)
+		return typeDeclaration
+	}
 }
 
 // Add a type that needs a TypeScript definition.
@@ -83,8 +94,8 @@ func (g *Go2TS) AddWithName(v interface{}, interfaceName string) error {
 		reflectType = reflect.TypeOf(v)
 	}
 
-	_, err := g.addType(reflectType, interfaceName)
-	return err
+	g.addTypeDeclaration(reflectType, interfaceName)
+	return nil
 }
 
 // AddUnion adds a TypeScript definition for a union type of the values in 'v',
@@ -113,44 +124,65 @@ func (g *Go2TS) AddMultipleUnion(values ...interface{}) error {
 // be used as the TypeScript type name.
 //
 func (g *Go2TS) AddUnionWithName(v interface{}, typeName string) error {
-	typ := reflect.TypeOf(v)
-	kind := typ.Kind()
-	if kind != reflect.Slice && kind != reflect.Array {
-		return fmt.Errorf("AddUnionWithName must be supplied an array or slice, got %v: %v", kind, v)
+	// We can only build union types from Go slices or arrays.
+	reflectType := reflect.TypeOf(v)
+	if reflectType.Kind() != reflect.Slice && reflectType.Kind() != reflect.Array {
+		return fmt.Errorf("AddUnionWithName must be supplied an array or slice, got %v: %v", reflectType.Kind(), v)
 	}
+
+	// Make sure we have a name for the union type.
 	if typeName == "" {
-		typeName = typ.Elem().Name()
+		typeName = reflectType.Elem().Name()
 	}
+
+	// We will populate the union type with the typescript.LiteralTypes corresponding to the elements
+	// in the passed in Go slice.
+	unionType := &typescript.UnionType{
+		Types: []typescript.Type{},
+	}
+
+	// Iterate over all elements in the passed in Go slice.
 	values := reflect.ValueOf(v)
-	valuesAsStrings := make([]string, values.Len())
-	for i := range valuesAsStrings {
+	for i := 0; i < values.Len(); i++ {
 		value := values.Index(i)
-		if value.Kind() == reflect.String {
-			valuesAsStrings[i] = fmt.Sprintf("%q", values.Index(i).Interface())
+
+		// Obtain the typescript.BasicType corresponding to the current element. We only support basic
+		// types; any other types will result in a panic.
+		var basicType typescript.BasicType
+		if value.Kind() == reflect.Bool {
+			basicType = typescript.Boolean
+		} else if isNumber(value.Kind()) {
+			basicType = typescript.Number
+		} else if value.Kind() == reflect.String {
+			basicType = typescript.String
 		} else {
-			valuesAsStrings[i] = fmt.Sprintf("%v", values.Index(i).Interface())
+			return fmt.Errorf("Go Kind %q cannot be used in a TypeScript union type.", value.Kind())
 		}
+
+		// Create a typescript.LiteralType for the current element and add it to the union type.
+		unionType.Types = append(unionType.Types, &typescript.LiteralType{
+			BasicType: basicType,
+			Literal:   fmt.Sprintf("%v", values.Index(i).Interface()),
+		})
 	}
-	unionDefinition := strings.Join(valuesAsStrings, " | ")
-	td := typeDefinition{
-		name: typeName,
-		tsType: &tsType{
-			typeName: unionDefinition,
-		},
-	}
-	if g.typesSeen[typeName] {
-		// A union type is always going to be more specific than the type
-		// definition found when building an interface, so overwrite the
-		// existing definition.
-		for i, t := range g.types {
-			if t.name == typeName {
-				g.types[i] = td
-			}
+
+	if existingTypeDeclaration, ok := g.typeDeclarations[reflectType.Elem()]; ok {
+		// The reflect.Type was already added, so if it's a TypeScript type alias, we'll update it to be
+		// an alias for the newly added union type.
+		existingTypeAliasDeclaration, ok := existingTypeDeclaration.(*typescript.TypeAliasDeclaration)
+		if !ok {
+			return fmt.Errorf("Go type %v was already added as something other than a TypeScript type alias.", reflectType.Elem())
 		}
-		return nil
+		existingTypeAliasDeclaration.Identifier = typeName
+		existingTypeAliasDeclaration.Type = unionType
+	} else {
+		// The reflect.Type hasn't been seen before, so we declare a new type alias for the union type.
+		g.getOrSaveTypeDeclaration(reflectType.Elem(), &typescript.TypeAliasDeclaration{
+			Identifier: typeName,
+			Type:       unionType,
+		})
 	}
-	g.typesSeen[typeName] = true
-	g.types = append(g.types, td)
+
 	return nil
 }
 
@@ -160,16 +192,23 @@ func (g *Go2TS) Render(w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	for _, intf := range g.interfaces {
-		if err := intf.render(w); err != nil {
-			return err
+
+	// Output TypeScript interfaces first.
+	for _, typeDeclaration := range g.typeDeclarationsInOrder {
+		if _, ok := typeDeclaration.(*typescript.InterfaceDeclaration); !ok {
+			continue
 		}
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, typeDeclaration.ToTypeScript())
 	}
 
-	for _, typ := range g.types {
-		if _, err := fmt.Fprintln(w, typ.String()); err != nil {
-			return err
+	// Output any other type definitions (e.g. type aliases) second.
+	for _, typeDeclaration := range g.typeDeclarationsInOrder {
+		if _, ok := typeDeclaration.(*typescript.InterfaceDeclaration); ok {
+			continue
 		}
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, typeDeclaration.ToTypeScript())
 	}
 
 	return nil
@@ -206,47 +245,35 @@ func isPrimitive(kind reflect.Kind) bool {
 	return numberKinds[kind] || nonNumberPrimitiveKinds[kind]
 }
 
-func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, isRecursive bool) *tsType {
-	var ret tsType
-	kind := reflectType.Kind()
-	if kind == reflect.Ptr {
-		ret.canBeNull = true
-		reflectType = removeIndirection(reflectType)
-		kind = reflectType.Kind()
-	}
+func isPrimitiveAlias(reflectType reflect.Type) bool {
+	return isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String()
+}
 
-	// As we build up the chain of tsTypes that fully describes a typeDefinition
-	// we may come across named types. For example: map[string]Donut, where
-	// Donut could be "type Donut string". Without this path the Donut type
-	// doesn't get added and map[string]Donut just gets emitted as
-	// '{ [key:string]: string }' and not '{ [key:string]: Donut }' In this case we
-	// need to add that type to all of our known types and return a reference to
-	// that type from here.
-	if !isRecursive && // Don't do this if called from addType().
-		reflectType.Name() != "" && // We only want this path for Kinds with a name.
-		!isTime(reflectType) && // Also skip time.Time, see AddWithName for explanation of time.Time handling.
-		(!isPrimitive(reflectType.Kind()) || // And either it's not a primitive Kind.
-			// Or it's case where a primitive Kind like string shows up with a type name.
-			(isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String())) {
-		typeName, err := g.addType(reflectType, "")
-		if err == nil {
-			return &tsType{
-				typeName:  typeName,
-				canBeNull: ret.canBeNull,
-			}
+func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, wasExplicitlyAdded bool) typescript.Type {
+	// If the type is a pointer, then we remove the pointer indirection, compute the resulting
+	// TypeScript type, and return the union between that type and null.
+	if reflectType.Kind() == reflect.Ptr {
+		tsType := g.reflectTypeToTypeScriptType(removeIndirection(reflectType), wasExplicitlyAdded)
+		return &typescript.UnionType{
+			Types: []typescript.Type{tsType, typescript.Null},
 		}
 	}
 
-	// Default to using the Go lang type name as the TypeScript type name.
-	nativeType := reflectType.String()
-
-	// Strip off the module name of the native type if present.
-	if i := strings.IndexByte(nativeType, '.'); i > -1 {
-		nativeType = nativeType[i+1:]
+	// If we have declared this type before, then we just return a reference to the declared type.
+	if existingTypeDeclaration, ok := g.typeDeclarations[reflectType]; ok {
+		return existingTypeDeclaration.TypeReference()
 	}
-	ret.typeName = nativeType
 
-	switch kind {
+	// Structs are declared as interfaces (save for time.Time, which is a special case handled below).
+	if reflectType.Kind() == reflect.Struct && !isTime(reflectType) {
+		return g.addInterfaceDeclaration(reflectType, "").TypeReference()
+	}
+
+	// Will hold the typescript.Type extracted from the reflect.Type.
+	var tsType typescript.Type
+
+	// Compute the TypeScript type based on the Kind of the reflected type.
+	switch reflectType.Kind() {
 	case reflect.Uint8,
 		reflect.Uint16,
 		reflect.Uint32,
@@ -259,19 +286,17 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, isRecursive bool
 		reflect.Int,
 		reflect.Float32,
 		reflect.Float64:
-		ret.typeName = "number"
+		tsType = typescript.Number
 
 	case reflect.String:
-		ret.typeName = "string"
+		tsType = typescript.String
 
 	case reflect.Bool:
-		ret.typeName = "boolean"
+		tsType = typescript.Boolean
 
 	case reflect.Map:
-		ret.typeName = "map"
-
-		// TypeScript index signature parameter types[1] must be either "string" or "number", and cannot
-		// be type aliases, otherwise the TypeScript compiler will fail with error
+		// TypeScript index signature parameter types[1] must be either "string" or "number", and
+		// cannot be type aliases, otherwise the TypeScript compiler will fail with error
 		// "TS1336: An index signature parameter type cannot be a type alias.".
 		//
 		// Example:
@@ -283,49 +308,82 @@ func (g *Go2TS) tsTypeFromReflectType(reflectType reflect.Type, isRecursive bool
 		// "string" or "number" directly.
 		//
 		// [1] https://www.typescriptlang.org/docs/handbook/advanced-types.html#index-types-and-index-signatures.
+		var indexType typescript.Type
 		if reflectType.Key().Kind() == reflect.String {
-			ret.keyType = &tsType{typeName: "string"}
+			indexType = typescript.String
 		} else if isNumber(reflectType.Key().Kind()) {
-			ret.keyType = &tsType{typeName: "number"}
+			indexType = typescript.Number
 		} else {
 			panic(fmt.Sprintf("Go Kind %q cannot be used as a TypeScript index signature parameter type.", reflectType.Key().Kind()))
 		}
 
-		ret.subType = g.tsTypeFromReflectType(reflectType.Elem(), false)
-
-	case reflect.Slice, reflect.Array:
-		ret.typeName = "array"
-		ret.canBeNull = (kind == reflect.Slice)
-		ret.subType = g.tsTypeFromReflectType(reflectType.Elem(), false)
-
-	case reflect.Struct:
-		if isTime(reflectType) {
-			ret.typeName = "string"
-		} else {
-			ret.typeName = "interface"
-			name, _ := g.addType(reflectType, "")
-			ret.interfaceName = name
+		tsType = &typescript.MapType{
+			IndexType: indexType,
+			ValueType: g.reflectTypeToTypeScriptType(reflectType.Elem(), false /* =wasExplicitlyAdded */),
 		}
 
+	case reflect.Slice, reflect.Array:
+		tsType = &typescript.ArrayType{
+			ItemsType: g.reflectTypeToTypeScriptType(reflectType.Elem(), false /* =wasExplicitlyAdded */),
+		}
+		// Slices can be nil, but not arrays.
+		if reflectType.Kind() == reflect.Slice {
+			tsType = &typescript.UnionType{
+				Types: []typescript.Type{tsType, typescript.Null},
+			}
+		}
+
+	case reflect.Struct:
+		// This is necessarily a time.Time because we handled all other structs earlier.
+		tsType = typescript.String
+
 	case reflect.Interface:
-		ret.typeName = "any"
+		tsType = typescript.Any
 
 	case reflect.Complex64,
 		reflect.Complex128,
 		reflect.Chan,
 		reflect.Func,
 		reflect.UnsafePointer:
-		panic(fmt.Sprintf("Go Kind %q cannot be serialized to JSON.", kind))
+		panic(fmt.Sprintf("Go Kind %q cannot be serialized to JSON.", reflectType.Kind()))
 	}
-	return &ret
+
+	// If this is a named Go type (e.g. "Donut", assuming we have added a "type Donut string" Go type)
+	// then we want to declare it as a TypeScript type alias (e.g. "export type Donut = string"), and
+	// this function should return a reference to the alias (e.g "Donut") instead of the underlying
+	// type (e.g. "string").
+	//
+	// Note that we only want to do this if the type in question wasn't added explicitly via a call to
+	// one of the Go2TS.Add*() methods because said methods will add the type declarations themselves.
+	if !wasExplicitlyAdded &&
+		// All type aliases have a non-empty name.
+		reflectType.Name() != "" &&
+		// But not all types with non-empty names are aliases (e.g. the name for the int type is "int").
+		(!isPrimitive(reflectType.Kind()) || isPrimitiveAlias(reflectType)) &&
+		// We don't want an alias for time.Time because we treat it as a string in TypeScript.
+		!isTime(reflectType) {
+		typeDeclaration := &typescript.TypeAliasDeclaration{
+			Identifier: reflectType.Name(),
+			Type:       tsType,
+		}
+
+		// If we've already added a TypeScript type delcaration for this Go type, we'll return a
+		// reference to the existing declaration, otherwise we'll return a reference to the new
+		// declaration.
+		return g.getOrSaveTypeDeclaration(reflectType, typeDeclaration).TypeReference()
+	}
+
+	return tsType
 }
 
-// addInterfaceFields recursively populates the fields of the given interfaceDefinition. It assumes
-// reflectType's Kind is Struct. If recursivelyForceOptional is true, any fields populated on this
-// or any recursive calls to this method will be marked as optional.
-func (g *Go2TS) addInterfaceFields(id *interfaceDefinition, reflectType reflect.Type, recursivelyForceOptional bool) {
-	for i := 0; i < reflectType.NumField(); i++ {
-		structField := reflectType.Field(i)
+// populateInterfaceDeclarationProperties recursively populates the properties of the given
+// interface declaration. It assumes reflectType's Kind is Struct. If recursivelyForceOptional is
+// true, any properties populated on this or any recursive calls to this method will be marked as
+// optional.
+func (g *Go2TS) populateInterfaceDeclarationProperties(interfaceDeclaration *typescript.InterfaceDeclaration, structType reflect.Type, recursivelyForceOptional bool) {
+	// Iterate over all fields of the given struct.
+	for i := 0; i < structType.NumField(); i++ {
+		structField := structType.Field(i)
 
 		// Skip unexported fields.
 		if len(structField.Name) == 0 || !ast.IsExported(structField.Name) {
@@ -338,27 +396,46 @@ func (g *Go2TS) addInterfaceFields(id *interfaceDefinition, reflectType reflect.
 		if structField.Anonymous && removeIndirection(structField.Type).Kind() == reflect.Struct {
 			// If the field is an embedded struct pointer, we recursively mark all its fields as optional.
 			// This is because json.Marshal() will omit said fields if the embedded struct pointer is nil.
-			g.addInterfaceFields(id, removeIndirection(structField.Type), recursivelyForceOptional || structField.Type.Kind() == reflect.Ptr)
+			g.populateInterfaceDeclarationProperties(interfaceDeclaration, removeIndirection(structField.Type), recursivelyForceOptional || structField.Type.Kind() == reflect.Ptr)
 			continue
 		}
 
-		field, ok := newFieldDefinition(structField)
-		if !ok {
+		// Read the field's `json:...` tag.
+		jsonTag := strings.Split(structField.Tag.Get("json"), ",")
+
+		// Read the property name from the `json:...` tag, or default to the field name.
+		propertyName := structField.Name
+		if len(jsonTag) > 0 && jsonTag[0] != "" {
+			propertyName = jsonTag[0]
+		}
+
+		// A `json:"-"` tag means the field will not be serialized to JSON, so we can skip it.
+		if propertyName == "-" {
 			continue
 		}
-		field.tsType = g.tsTypeFromReflectType(structField.Type, false)
-		field.isOptional = field.isOptional || recursivelyForceOptional
 
 		// If a field in an embedded struct has the same name as a field in the outer struct, the
 		// outermost field will take precendence in the output of json.Marshal(). However, this opaque
 		// behavior is probably not what the programmer intended, so we fail loudly to prevent bugs.
-		for _, existingField := range id.Fields {
-			if field.name == existingField.name {
-				panic(fmt.Sprintf("Attempted to populate interface %q with more than one field named %q. (Did you embed two structs with overlapping field names?)", id.Name, field.name))
+		for _, property := range interfaceDeclaration.Properties {
+			if propertyName == property.Identifier {
+				panic(fmt.Sprintf("Attempted to populate interface %q with more than one field named %q. (Did you embed two structs with overlapping field names?)", interfaceDeclaration.Identifier, property.Identifier))
 			}
 		}
 
-		id.Fields = append(id.Fields, field)
+		// Recursively compute the property's TypeScript type.
+		propertyType := g.reflectTypeToTypeScriptType(structField.Type, false /* =wasExplicitlyAdded */)
+
+		// We mark the property as optional if the field is tagged with "omitempty".
+		markedAsOptional := len(jsonTag) > 1 && jsonTag[1] == "omitempty"
+
+		// Create the property signature and add it to the interface declaration.
+		property := typescript.PropertySignature{
+			Identifier: propertyName,
+			Type:       propertyType,
+			Optional:   recursivelyForceOptional || markedAsOptional,
+		}
+		interfaceDeclaration.Properties = append(interfaceDeclaration.Properties, property)
 	}
 }
 
@@ -367,160 +444,67 @@ func (g *Go2TS) getAnonymousInterfaceName() string {
 	return fmt.Sprintf("Anonymous%d", g.anonymousCount)
 }
 
-func (g *Go2TS) addType(reflectType reflect.Type, interfaceName string) (string, error) {
-	reflectType = removeIndirection(reflectType)
-	if tsTypeName, ok := g.interfacesSeen[reflectType]; ok {
-		return tsTypeName, nil
-	}
-	if reflectType.Kind() == reflect.Struct {
-		if interfaceName == "" {
-			interfaceName = strings.Title(reflectType.Name())
-		}
-		if interfaceName == "" {
-			interfaceName = g.getAnonymousInterfaceName()
-		}
+func (g *Go2TS) addInterfaceDeclaration(structType reflect.Type, interfaceName string) *typescript.InterfaceDeclaration {
+	structType = removeIndirection(structType)
 
-		intf := interfaceDefinition{
-			Name:   interfaceName,
-			Fields: make([]fieldDefinition, 0, reflectType.NumField()),
-		}
-
-		g.interfacesSeen[reflectType] = intf.Name
-		g.addInterfaceFields(&intf, reflectType, false /* =recursivelyForceOptional */)
-		g.interfaces = append(g.interfaces, intf)
-		return intf.Name, nil
+	// Only structs can be declared as TypeScript interfaces.
+	if structType.Kind() != reflect.Struct {
+		panic(fmt.Sprintf(`Go Kind %q cannot be declared as a TypeScript interface.`, structType.Kind()))
 	}
 
-	// Handle non-struct types.
-	typeDefinition := newTypeDefinition(reflectType)
-	if interfaceName != "" {
-		typeDefinition.name = interfaceName
+	// Nothing to do if the TypeScript interface has already been declared.
+	if existingTypeDeclaration, ok := g.typeDeclarations[structType]; ok {
+		return existingTypeDeclaration.(*typescript.InterfaceDeclaration)
 	}
-	typeDefinition.tsType = g.tsTypeFromReflectType(reflectType, true)
-	if g.typesSeen[typeDefinition.name] {
-		return typeDefinition.name, nil
+
+	// Make sure we have a name for the interface, which could be anonymous.
+	if interfaceName == "" {
+		interfaceName = strings.Title(structType.Name())
 	}
-	g.typesSeen[typeDefinition.name] = true
-	g.types = append(g.types, typeDefinition)
-	return typeDefinition.name, nil
+	if interfaceName == "" {
+		interfaceName = g.getAnonymousInterfaceName()
+	}
+
+	// Create the interface declaration and populate its fields, which recurses into any embedded
+	// structs.
+	interfaceDeclaration := &typescript.InterfaceDeclaration{
+		Identifier: interfaceName,
+		Properties: []typescript.PropertySignature{},
+	}
+	g.populateInterfaceDeclarationProperties(interfaceDeclaration, structType, false /* =recursivelyForceOptional */)
+
+	g.typeDeclarations[structType] = interfaceDeclaration
+	g.typeDeclarationsInOrder = append(g.typeDeclarationsInOrder, interfaceDeclaration)
+
+	return interfaceDeclaration
 }
 
-// tsType represents either a type of a field, like "string", or part of
-// a more complex type like the map[string] part of map[string]time.Time.
-type tsType struct {
-	// typeName is the TypeScript type, such as "string", or "map", or "SomeInterfaceName".
-	typeName string
-
-	// keyType is the type of the key if this tsType is a map, such as "string" or "number".
-	keyType *tsType
-
-	// interfaceName is the name of the TypeScript interface if the tsType is
-	// "interface".
-	interfaceName string
-
-	canBeNull bool
-	subType   *tsType
-}
-
-// String returns the tsType formatted as TypeScript.
-func (s tsType) String() string {
-	var ret string
-	switch s.typeName {
-	case "array":
-		if s.subType.canBeNull {
-			// We add parentheses if the type can be null. We want "(X | null)[]", not "X | null[]".
-			ret = fmt.Sprintf("(%s)[]", s.subType.String())
-		} else {
-			ret = s.subType.String() + "[]"
-		}
-	case "map":
-		ret = fmt.Sprintf("{ [key: %s]: %s }", s.keyType.String(), s.subType.String())
-	case "interface":
-		ret = s.interfaceName
-	default:
-		ret = s.typeName
+func (g *Go2TS) addTypeDeclaration(reflectType reflect.Type, typeName string) {
+	// Struct types are declared as TypeScript interfaces.
+	if removeIndirection(reflectType).Kind() == reflect.Struct {
+		g.addInterfaceDeclaration(reflectType, typeName)
+		return
 	}
 
-	if s.canBeNull {
-		return fmt.Sprintf("%s | null", ret)
-	}
-	return ret
-}
-
-// typeDefinition represents a TypeScript type definition.
-type typeDefinition struct {
-	name   string
-	tsType *tsType
-}
-
-func (t typeDefinition) String() string {
-	return fmt.Sprintf("\nexport type %s = %s;", t.name, t.tsType.String())
-}
-
-// newTypeDefinition creates a new typeDefinition from the given reflect.Type.
-func newTypeDefinition(reflectType reflect.Type) typeDefinition {
-	return typeDefinition{
-		name: reflectType.Name(),
-	}
-}
-
-// fieldDefinition represents one field in an interface.
-type fieldDefinition struct {
-	// The name of the interface field.
-	name       string
-	tsType     *tsType
-	isOptional bool
-}
-
-func (f fieldDefinition) String() string {
-	optional := ""
-	if f.isOptional {
-		optional = "?"
+	// All other type declarations are handled as type aliases (except for union types, which are
+	// handled separately).
+	if _, ok := g.typeDeclarations[reflectType]; ok {
+		return
 	}
 
-	return fmt.Sprintf("\t%s%s: %s;", f.name, optional, f.tsType.String())
-}
-
-// newFieldDefinition creates a new fieldDefinition from the given reflect.StructField.
-//
-// If the bool returned is false then the field is not exported to JSON.
-func newFieldDefinition(structField reflect.StructField) (fieldDefinition, bool) {
-	var ret fieldDefinition
-	jsonTag := strings.Split(structField.Tag.Get("json"), ",")
-
-	ret.name = structField.Name
-	if len(jsonTag) > 0 && jsonTag[0] != "" {
-		ret.name = jsonTag[0]
+	if typeName == "" {
+		typeName = reflectType.Name()
 	}
-	if ret.name == "-" {
-		return ret, false
+	typeDeclaration := &typescript.TypeAliasDeclaration{
+		Identifier: typeName,
+		Type:       g.reflectTypeToTypeScriptType(reflectType, true /* =wasExplicitlyAdded */),
 	}
-	ret.isOptional = len(jsonTag) > 1 && jsonTag[1] == "omitempty"
-	return ret, true
+
+	g.getOrSaveTypeDeclaration(reflectType, typeDeclaration)
 }
 
 func isTime(t reflect.Type) bool {
 	return t.Name() == "Time" && t.PkgPath() == "time"
-}
-
-// interfaceDefinition represents a single Go struct that gets emitted as a
-// TypeScript interface.
-type interfaceDefinition struct {
-	// Name is the TypeScript interface Name in the generated output.
-	Name   string
-	Fields []fieldDefinition
-}
-
-var interfaceDefinitionTemplate = template.Must(template.New("").Parse(`
-export interface {{ .Name }} {
-{{ range .Fields -}}
-	{{- . }}
-{{ end -}}
-}
-`))
-
-func (s *interfaceDefinition) render(w io.Writer) error {
-	return interfaceDefinitionTemplate.Execute(w, s)
 }
 
 func removeIndirection(reflectType reflect.Type) reflect.Type {
