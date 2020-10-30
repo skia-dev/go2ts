@@ -98,8 +98,7 @@ func (g *Go2TS) AddWithName(v interface{}, interfaceName string) error {
 //
 // If the type is a struct, the fields of the struct will be named following the
 // convention for json serialization, including using the json tag if supplied.
-// Fields tagged with `json:",omitempty"` will have "| null" added to their
-// type.
+// Fields tagged with `json:",omitempty"` will be marked as optional.
 //
 // There is special handling of time.Time types to be TypeScript "string"s since
 // time.Time implements MarshalJSON, see
@@ -300,11 +299,14 @@ func isPrimitiveAlias(reflectType reflect.Type) bool {
 	return isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String()
 }
 
-func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, namespace string, wasExplicitlyAdded bool) typescript.Type {
+func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, namespace string, wasExplicitlyAdded, ignoreNil bool) typescript.Type {
 	// If the type is a pointer, then we remove the pointer indirection, compute the resulting
 	// TypeScript type, and return the union between that type and null.
 	if reflectType.Kind() == reflect.Ptr {
-		tsType := g.reflectTypeToTypeScriptType(removeIndirection(reflectType), namespace, wasExplicitlyAdded)
+		tsType := g.reflectTypeToTypeScriptType(removeIndirection(reflectType), namespace, wasExplicitlyAdded, ignoreNil)
+		if ignoreNil {
+			return tsType
+		}
 		return &typescript.UnionType{
 			Types: []typescript.Type{tsType, typescript.Null},
 		}
@@ -370,15 +372,15 @@ func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, namespace 
 
 		tsType = &typescript.MapType{
 			IndexType: indexType,
-			ValueType: g.reflectTypeToTypeScriptType(reflectType.Elem(), namespace, false /* =wasExplicitlyAdded */),
+			ValueType: g.reflectTypeToTypeScriptType(reflectType.Elem(), namespace, false /* =wasExplicitlyAdded */, ignoreNil),
 		}
 
 	case reflect.Slice, reflect.Array:
 		tsType = &typescript.ArrayType{
-			ItemsType: g.reflectTypeToTypeScriptType(reflectType.Elem(), namespace, false /* =wasExplicitlyAdded */),
+			ItemsType: g.reflectTypeToTypeScriptType(reflectType.Elem(), namespace, false /* =wasExplicitlyAdded */, ignoreNil),
 		}
 		// Slices can be nil, but not arrays.
-		if reflectType.Kind() == reflect.Slice {
+		if reflectType.Kind() == reflect.Slice && !ignoreNil {
 			tsType = &typescript.UnionType{
 				Types: []typescript.Type{tsType, typescript.Null},
 			}
@@ -475,8 +477,20 @@ func (g *Go2TS) populateInterfaceDeclarationProperties(interfaceDeclaration *typ
 			}
 		}
 
+		// A `go2ts:"ignorenil"` tag means that any nillable types will be treated as their non-nillable
+		// counterparts when recursively computing the TypeScript type of the current field. Concretely,
+		// this means that pointers will have the indirection removed, and slices will be treated as
+		// arrays.
+		//
+		// Note that "ignorenil" propagates recursively, meaning that any previously unseen types will
+		// be added with their nil types ignored. For example, if the current field has type Foo,
+		// defined as "type Foo []string", and it's annotated with `go2ts:"ignorenil"`, then the
+		// TypeScript type Foo will be declared as "type Foo = string[]" instead of
+		// "type Foo = string[] | null".
+		ignoreNil := structField.Tag.Get("go2ts") == "ignorenil"
+
 		// Recursively compute the property's TypeScript type.
-		propertyType := g.reflectTypeToTypeScriptType(structField.Type, interfaceDeclaration.Namespace, false /* =wasExplicitlyAdded */)
+		propertyType := g.reflectTypeToTypeScriptType(structField.Type, interfaceDeclaration.Namespace, false /* =wasExplicitlyAdded */, ignoreNil)
 
 		// We mark the property as optional if the field is tagged with "omitempty".
 		markedAsOptional := len(jsonTag) > 1 && jsonTag[1] == "omitempty"
@@ -551,7 +565,7 @@ func (g *Go2TS) addTypeDeclaration(reflectType reflect.Type, typeName, namespace
 	typeDeclaration := &typescript.TypeAliasDeclaration{
 		Namespace:  namespace,
 		Identifier: typeName,
-		Type:       g.reflectTypeToTypeScriptType(reflectType, namespace, true /* =wasExplicitlyAdded */),
+		Type:       g.reflectTypeToTypeScriptType(reflectType, namespace, true /* =wasExplicitlyAdded */, false /* =ignoreNil */),
 	}
 
 	g.getOrSaveTypeDeclaration(reflectType, typeDeclaration)
