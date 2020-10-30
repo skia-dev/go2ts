@@ -88,51 +88,63 @@ func TestRender_ComplexStruct_Success(t *testing.T) {
 
 	type Data map[string]interface{}
 
+	type ParamSet map[string][]string
+
+	type ParamSetIgnoreNil map[string][]string
+
 	type ComplexStruct struct {
-		String                 string
-		StringWithAnnotation   string `json:"s"`
-		Bool                   bool
-		Int                    int
-		Float64                float64
-		Time                   time.Time
-		Other                  OtherStruct
-		OtherPtr               *OtherStruct
-		WithEmbeddedStruct     StructWithEmbeddedStruct
-		WithEmbeddedStructPtr  StructWithEmbeddedStructPtr
-		MultilevelEmbedded     MultilevelEmbeddedStruct
-		OptionalString         string       `json:",omitempty"`
-		OptionalInt            int          `json:",omitempty"`
-		OptionalFloat64        float64      `json:",omitempty"`
-		OptionalTime           time.Time    `json:",omitempty"`
-		OptionalOtherStruct    OtherStruct  `json:",omitempty"`
-		OptionalOtherStructPtr *OtherStruct `json:",omitempty"`
-		Data                   Data
-		DataPtr                *Data
-		MapStringSlice         map[string][]string
-		MapStringSliceSlice    map[string][][]string
-		MapStringPtrSlice      map[string][]*string
-		MapIntKeys             map[int]string
-		MapStringAliasKeys     map[Mode]string
-		MapIntAliasKeys        map[Offset]string
-		MapOtherStruct         map[string]OtherStruct
-		MapOtherStructPtr      map[string]*OtherStruct
-		Slice                  []string
-		SliceOfSlice           [][]string
-		SliceOfData            []Data
-		MapOfData              map[string]Data
-		MapOfSliceOfData       map[string][]Data
-		MapOfMapOfSliceOfData  map[string]map[string][]Data
-		Mode                   Mode
-		InlineStruct           struct{ A int }
-		Array                  [3]string
-		skipped                bool
-		Offset                 Offset
-		Color                  color.Alpha
-		Direction              Direction
-		AppleVariety           AppleVariety
-		OrangeVariety          OrangeVariety
-		AppleOrchard           AppleOrchard
-		NotSerialized          string `json:"-"`
+		String                          string
+		StringWithAnnotation            string `json:"s"`
+		Bool                            bool
+		Int                             int
+		Float64                         float64
+		Time                            time.Time
+		Other                           OtherStruct
+		OtherPtr                        *OtherStruct
+		WithEmbeddedStruct              StructWithEmbeddedStruct
+		WithEmbeddedStructPtr           StructWithEmbeddedStructPtr
+		MultilevelEmbedded              MultilevelEmbeddedStruct
+		OptionalString                  string       `json:",omitempty"`
+		OptionalInt                     int          `json:",omitempty"`
+		OptionalFloat64                 float64      `json:",omitempty"`
+		OptionalTime                    time.Time    `json:",omitempty"`
+		OptionalOtherStruct             OtherStruct  `json:",omitempty"`
+		OptionalOtherStructPtr          *OtherStruct `json:",omitempty"`
+		OptionalOtherStructPtrIgnoreNil *OtherStruct `json:",omitempty" go2ts:"ignorenil"`
+		Data                            Data
+		DataPtr                         *Data
+		ParamSet                        ParamSet
+		ParamSetIgnoreNil               ParamSetIgnoreNil `go2ts:"ignorenil"`
+		MapStringSlice                  map[string][]string
+		MapStringSliceIgnoreNil         map[string][]string `go2ts:"ignorenil"`
+		MapStringSliceSlice             map[string][][]string
+		MapStringSliceSliceIgnoreNil    map[string][][]string `go2ts:"ignorenil"`
+		MapStringPtrSlice               map[string][]*string
+		MapStringPtrSliceIgnoreNil      map[string][]*string `go2ts:"ignorenil"`
+		MapIntKeys                      map[int]string
+		MapStringAliasKeys              map[Mode]string
+		MapIntAliasKeys                 map[Offset]string
+		MapOtherStruct                  map[string]OtherStruct
+		MapOtherStructPtr               map[string]*OtherStruct
+		Slice                           []string
+		SliceIgnoreNil                  []string `go2ts:"ignorenil"`
+		SliceOfSlice                    [][]string
+		SliceOfSliceIgnoreNil           [][]string `go2ts:"ignorenil"`
+		SliceOfData                     []Data
+		MapOfData                       map[string]Data
+		MapOfSliceOfData                map[string][]Data
+		MapOfMapOfSliceOfData           map[string]map[string][]Data
+		Mode                            Mode
+		InlineStruct                    struct{ A int }
+		Array                           [3]string
+		skipped                         bool
+		Offset                          Offset
+		Color                           color.Alpha
+		Direction                       Direction
+		AppleVariety                    AppleVariety
+		OrangeVariety                   OrangeVariety
+		AppleOrchard                    AppleOrchard
+		NotSerialized                   string `json:"-"`
 	}
 
 	const complexStructExpected = `// DO NOT EDIT. This file is automatically generated.
@@ -198,18 +210,26 @@ export interface ComplexStruct {
 	OptionalTime?: string;
 	OptionalOtherStruct?: OtherStruct;
 	OptionalOtherStructPtr?: OtherStruct | null;
+	OptionalOtherStructPtrIgnoreNil?: OtherStruct;
 	Data: Data;
 	DataPtr: Data | null;
+	ParamSet: ParamSet;
+	ParamSetIgnoreNil: ParamSetIgnoreNil;
 	MapStringSlice: { [key: string]: string[] | null };
+	MapStringSliceIgnoreNil: { [key: string]: string[] };
 	MapStringSliceSlice: { [key: string]: (string[] | null)[] | null };
+	MapStringSliceSliceIgnoreNil: { [key: string]: string[][] };
 	MapStringPtrSlice: { [key: string]: (string | null)[] | null };
+	MapStringPtrSliceIgnoreNil: { [key: string]: string[] };
 	MapIntKeys: { [key: number]: string };
 	MapStringAliasKeys: { [key: string]: string };
 	MapIntAliasKeys: { [key: number]: string };
 	MapOtherStruct: { [key: string]: OtherStruct };
 	MapOtherStructPtr: { [key: string]: OtherStruct | null };
 	Slice: string[] | null;
+	SliceIgnoreNil: string[];
 	SliceOfSlice: (string[] | null)[] | null;
+	SliceOfSliceIgnoreNil: string[][];
 	SliceOfData: Data[] | null;
 	MapOfData: { [key: string]: Data };
 	MapOfSliceOfData: { [key: string]: Data[] | null };
@@ -230,6 +250,10 @@ export namespace apple { export type YearlyYield = { [key: number]: number }; }
 export namespace apple { export type Variety = "honeycrisp" | "gala"; }
 
 export type Data = { [key: string]: any };
+
+export type ParamSet = { [key: string]: string[] | null };
+
+export type ParamSetIgnoreNil = { [key: string]: string[] };
 
 export type Mode = string;
 
