@@ -264,39 +264,145 @@ func (g *Go2TS) Render(w io.Writer) error {
 	return nil
 }
 
-// numbers is the set of Kinds that we convert into the TypeScript "number" type.
-var numberKinds = map[reflect.Kind]bool{
-	reflect.Int:     true,
-	reflect.Int8:    true,
-	reflect.Int16:   true,
-	reflect.Int32:   true,
-	reflect.Int64:   true,
-	reflect.Uint:    true,
-	reflect.Uint8:   true,
-	reflect.Uint16:  true,
-	reflect.Uint32:  true,
-	reflect.Uint64:  true,
-	reflect.Float32: true,
-	reflect.Float64: true,
+func (g *Go2TS) addTypeDeclaration(reflectType reflect.Type, typeName, namespace string) {
+	// Struct types are declared as TypeScript interfaces.
+	if removeIndirection(reflectType).Kind() == reflect.Struct {
+		g.addInterfaceDeclaration(reflectType, typeName, namespace)
+		return
+	}
+
+	// All other type declarations are handled as type aliases (except for union types, which are
+	// handled separately).
+	if _, ok := g.typeDeclarations[reflectType]; ok {
+		return
+	}
+
+	if typeName == "" {
+		typeName = reflectType.Name()
+	}
+	typeDeclaration := &typescript.TypeAliasDeclaration{
+		Namespace:  namespace,
+		Identifier: typeName,
+		Type:       g.reflectTypeToTypeScriptType(reflectType, namespace, true /* =wasExplicitlyAdded */, false /* =ignoreNil */),
+	}
+
+	g.getOrSaveTypeDeclaration(reflectType, typeDeclaration)
 }
 
-func isNumber(kind reflect.Kind) bool {
-	return numberKinds[kind]
+func (g *Go2TS) addInterfaceDeclaration(structType reflect.Type, interfaceName, namespace string) *typescript.InterfaceDeclaration {
+	structType = removeIndirection(structType)
+
+	// Only structs can be declared as TypeScript interfaces.
+	if structType.Kind() != reflect.Struct {
+		panic(fmt.Sprintf(`Go Kind %q cannot be declared as a TypeScript interface.`, structType.Kind()))
+	}
+
+	// Nothing to do if the TypeScript interface has already been declared.
+	if existingTypeDeclaration, ok := g.typeDeclarations[structType]; ok {
+		return existingTypeDeclaration.(*typescript.InterfaceDeclaration)
+	}
+
+	// Make sure we have a name for the interface, which could be anonymous.
+	if interfaceName == "" {
+		interfaceName = strings.Title(structType.Name())
+	}
+	if interfaceName == "" {
+		interfaceName = g.getAnonymousInterfaceName()
+	}
+
+	// Create the interface declaration and populate its fields, which recurses into any embedded
+	// structs.
+	interfaceDeclaration := &typescript.InterfaceDeclaration{
+		Namespace:  namespace,
+		Identifier: interfaceName,
+		Properties: []typescript.PropertySignature{},
+	}
+	g.populateInterfaceDeclarationProperties(interfaceDeclaration, structType, false /* =recursivelyForceOptional */)
+
+	g.typeDeclarations[structType] = interfaceDeclaration
+	g.typeDeclarationsInOrder = append(g.typeDeclarationsInOrder, interfaceDeclaration)
+
+	return interfaceDeclaration
 }
 
-// nonNumberPrimitiveKinds is the non-number set of Kinds that we support converting to TypeScript.
-var nonNumberPrimitiveKinds = map[reflect.Kind]bool{
-	reflect.Bool:    true,
-	reflect.Uintptr: true,
-	reflect.String:  true,
+func (g *Go2TS) getAnonymousInterfaceName() string {
+	g.anonymousCount++
+	return fmt.Sprintf("Anonymous%d", g.anonymousCount)
 }
 
-func isPrimitive(kind reflect.Kind) bool {
-	return numberKinds[kind] || nonNumberPrimitiveKinds[kind]
-}
+// populateInterfaceDeclarationProperties recursively populates the properties of the given
+// interface declaration. It assumes reflectType's Kind is Struct. If recursivelyForceOptional is
+// true, any properties populated on this or any recursive calls to this method will be marked as
+// optional.
+func (g *Go2TS) populateInterfaceDeclarationProperties(interfaceDeclaration *typescript.InterfaceDeclaration, structType reflect.Type, recursivelyForceOptional bool) {
+	// Iterate over all fields of the given struct.
+	for i := 0; i < structType.NumField(); i++ {
+		structField := structType.Field(i)
 
-func isPrimitiveAlias(reflectType reflect.Type) bool {
-	return isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String()
+		// Skip unexported fields.
+		if len(structField.Name) == 0 || !ast.IsExported(structField.Name) {
+			continue
+		}
+
+		// If the field is an embedded struct, or an embedded struct pointer, we add the inner struct's
+		// fields to the outer struct (i.e. we flatten the structs). This is consistent with
+		// json.Marshal().
+		if structField.Anonymous && removeIndirection(structField.Type).Kind() == reflect.Struct {
+			// If the field is an embedded struct pointer, we recursively mark all its fields as optional.
+			// This is because json.Marshal() will omit said fields if the embedded struct pointer is nil.
+			g.populateInterfaceDeclarationProperties(interfaceDeclaration, removeIndirection(structField.Type), recursivelyForceOptional || structField.Type.Kind() == reflect.Ptr)
+			continue
+		}
+
+		// Read the field's `json:...` tag.
+		jsonTag := strings.Split(structField.Tag.Get("json"), ",")
+
+		// Read the property name from the `json:...` tag, or default to the field name.
+		propertyName := structField.Name
+		if len(jsonTag) > 0 && jsonTag[0] != "" {
+			propertyName = jsonTag[0]
+		}
+
+		// A `json:"-"` tag means the field will not be serialized to JSON, so we can skip it.
+		if propertyName == "-" {
+			continue
+		}
+
+		// If a field in an embedded struct has the same name as a field in the outer struct, the
+		// outermost field will take precendence in the output of json.Marshal(). However, this opaque
+		// behavior is probably not what the programmer intended, so we fail loudly to prevent bugs.
+		for _, property := range interfaceDeclaration.Properties {
+			if propertyName == property.Identifier {
+				panic(fmt.Sprintf("Attempted to populate interface %q with more than one field named %q. (Did you embed two structs with overlapping field names?)", interfaceDeclaration.Identifier, property.Identifier))
+			}
+		}
+
+		// A `go2ts:"ignorenil"` tag means that any nillable types will be treated as their non-nillable
+		// counterparts when recursively computing the TypeScript type of the current field. Concretely,
+		// this means that pointers will have the indirection removed, and slices will be treated as
+		// arrays.
+		//
+		// Note that "ignorenil" propagates recursively, meaning that any previously unseen types will
+		// be added with their nil types ignored. For example, if the current field has type Foo,
+		// defined as "type Foo []string", and it's annotated with `go2ts:"ignorenil"`, then the
+		// TypeScript type Foo will be declared as "type Foo = string[]" instead of
+		// "type Foo = string[] | null".
+		ignoreNil := structField.Tag.Get("go2ts") == "ignorenil"
+
+		// Recursively compute the property's TypeScript type.
+		propertyType := g.reflectTypeToTypeScriptType(structField.Type, interfaceDeclaration.Namespace, false /* =wasExplicitlyAdded */, ignoreNil)
+
+		// We mark the property as optional if the field is tagged with "omitempty".
+		markedAsOptional := len(jsonTag) > 1 && jsonTag[1] == "omitempty"
+
+		// Create the property signature and add it to the interface declaration.
+		property := typescript.PropertySignature{
+			Identifier: propertyName,
+			Type:       propertyType,
+			Optional:   recursivelyForceOptional || markedAsOptional,
+		}
+		interfaceDeclaration.Properties = append(interfaceDeclaration.Properties, property)
+	}
 }
 
 func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, namespace string, wasExplicitlyAdded, ignoreNil bool) typescript.Type {
@@ -430,151 +536,6 @@ func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, namespace 
 	return tsType
 }
 
-// populateInterfaceDeclarationProperties recursively populates the properties of the given
-// interface declaration. It assumes reflectType's Kind is Struct. If recursivelyForceOptional is
-// true, any properties populated on this or any recursive calls to this method will be marked as
-// optional.
-func (g *Go2TS) populateInterfaceDeclarationProperties(interfaceDeclaration *typescript.InterfaceDeclaration, structType reflect.Type, recursivelyForceOptional bool) {
-	// Iterate over all fields of the given struct.
-	for i := 0; i < structType.NumField(); i++ {
-		structField := structType.Field(i)
-
-		// Skip unexported fields.
-		if len(structField.Name) == 0 || !ast.IsExported(structField.Name) {
-			continue
-		}
-
-		// If the field is an embedded struct, or an embedded struct pointer, we add the inner struct's
-		// fields to the outer struct (i.e. we flatten the structs). This is consistent with
-		// json.Marshal().
-		if structField.Anonymous && removeIndirection(structField.Type).Kind() == reflect.Struct {
-			// If the field is an embedded struct pointer, we recursively mark all its fields as optional.
-			// This is because json.Marshal() will omit said fields if the embedded struct pointer is nil.
-			g.populateInterfaceDeclarationProperties(interfaceDeclaration, removeIndirection(structField.Type), recursivelyForceOptional || structField.Type.Kind() == reflect.Ptr)
-			continue
-		}
-
-		// Read the field's `json:...` tag.
-		jsonTag := strings.Split(structField.Tag.Get("json"), ",")
-
-		// Read the property name from the `json:...` tag, or default to the field name.
-		propertyName := structField.Name
-		if len(jsonTag) > 0 && jsonTag[0] != "" {
-			propertyName = jsonTag[0]
-		}
-
-		// A `json:"-"` tag means the field will not be serialized to JSON, so we can skip it.
-		if propertyName == "-" {
-			continue
-		}
-
-		// If a field in an embedded struct has the same name as a field in the outer struct, the
-		// outermost field will take precendence in the output of json.Marshal(). However, this opaque
-		// behavior is probably not what the programmer intended, so we fail loudly to prevent bugs.
-		for _, property := range interfaceDeclaration.Properties {
-			if propertyName == property.Identifier {
-				panic(fmt.Sprintf("Attempted to populate interface %q with more than one field named %q. (Did you embed two structs with overlapping field names?)", interfaceDeclaration.Identifier, property.Identifier))
-			}
-		}
-
-		// A `go2ts:"ignorenil"` tag means that any nillable types will be treated as their non-nillable
-		// counterparts when recursively computing the TypeScript type of the current field. Concretely,
-		// this means that pointers will have the indirection removed, and slices will be treated as
-		// arrays.
-		//
-		// Note that "ignorenil" propagates recursively, meaning that any previously unseen types will
-		// be added with their nil types ignored. For example, if the current field has type Foo,
-		// defined as "type Foo []string", and it's annotated with `go2ts:"ignorenil"`, then the
-		// TypeScript type Foo will be declared as "type Foo = string[]" instead of
-		// "type Foo = string[] | null".
-		ignoreNil := structField.Tag.Get("go2ts") == "ignorenil"
-
-		// Recursively compute the property's TypeScript type.
-		propertyType := g.reflectTypeToTypeScriptType(structField.Type, interfaceDeclaration.Namespace, false /* =wasExplicitlyAdded */, ignoreNil)
-
-		// We mark the property as optional if the field is tagged with "omitempty".
-		markedAsOptional := len(jsonTag) > 1 && jsonTag[1] == "omitempty"
-
-		// Create the property signature and add it to the interface declaration.
-		property := typescript.PropertySignature{
-			Identifier: propertyName,
-			Type:       propertyType,
-			Optional:   recursivelyForceOptional || markedAsOptional,
-		}
-		interfaceDeclaration.Properties = append(interfaceDeclaration.Properties, property)
-	}
-}
-
-func (g *Go2TS) getAnonymousInterfaceName() string {
-	g.anonymousCount++
-	return fmt.Sprintf("Anonymous%d", g.anonymousCount)
-}
-
-func (g *Go2TS) addInterfaceDeclaration(structType reflect.Type, interfaceName, namespace string) *typescript.InterfaceDeclaration {
-	structType = removeIndirection(structType)
-
-	// Only structs can be declared as TypeScript interfaces.
-	if structType.Kind() != reflect.Struct {
-		panic(fmt.Sprintf(`Go Kind %q cannot be declared as a TypeScript interface.`, structType.Kind()))
-	}
-
-	// Nothing to do if the TypeScript interface has already been declared.
-	if existingTypeDeclaration, ok := g.typeDeclarations[structType]; ok {
-		return existingTypeDeclaration.(*typescript.InterfaceDeclaration)
-	}
-
-	// Make sure we have a name for the interface, which could be anonymous.
-	if interfaceName == "" {
-		interfaceName = strings.Title(structType.Name())
-	}
-	if interfaceName == "" {
-		interfaceName = g.getAnonymousInterfaceName()
-	}
-
-	// Create the interface declaration and populate its fields, which recurses into any embedded
-	// structs.
-	interfaceDeclaration := &typescript.InterfaceDeclaration{
-		Namespace:  namespace,
-		Identifier: interfaceName,
-		Properties: []typescript.PropertySignature{},
-	}
-	g.populateInterfaceDeclarationProperties(interfaceDeclaration, structType, false /* =recursivelyForceOptional */)
-
-	g.typeDeclarations[structType] = interfaceDeclaration
-	g.typeDeclarationsInOrder = append(g.typeDeclarationsInOrder, interfaceDeclaration)
-
-	return interfaceDeclaration
-}
-
-func (g *Go2TS) addTypeDeclaration(reflectType reflect.Type, typeName, namespace string) {
-	// Struct types are declared as TypeScript interfaces.
-	if removeIndirection(reflectType).Kind() == reflect.Struct {
-		g.addInterfaceDeclaration(reflectType, typeName, namespace)
-		return
-	}
-
-	// All other type declarations are handled as type aliases (except for union types, which are
-	// handled separately).
-	if _, ok := g.typeDeclarations[reflectType]; ok {
-		return
-	}
-
-	if typeName == "" {
-		typeName = reflectType.Name()
-	}
-	typeDeclaration := &typescript.TypeAliasDeclaration{
-		Namespace:  namespace,
-		Identifier: typeName,
-		Type:       g.reflectTypeToTypeScriptType(reflectType, namespace, true /* =wasExplicitlyAdded */, false /* =ignoreNil */),
-	}
-
-	g.getOrSaveTypeDeclaration(reflectType, typeDeclaration)
-}
-
-func isTime(t reflect.Type) bool {
-	return t.Name() == "Time" && t.PkgPath() == "time"
-}
-
 func removeIndirection(reflectType reflect.Type) reflect.Type {
 	kind := reflectType.Kind()
 	// Follow all the pointers until we get to a non-Ptr kind.
@@ -583,4 +544,43 @@ func removeIndirection(reflectType reflect.Type) reflect.Type {
 		kind = reflectType.Kind()
 	}
 	return reflectType
+}
+
+func isTime(t reflect.Type) bool {
+	return t.Name() == "Time" && t.PkgPath() == "time"
+}
+
+// numbers is the set of Kinds that we convert into the TypeScript "number" type.
+var numberKinds = map[reflect.Kind]bool{
+	reflect.Int:     true,
+	reflect.Int8:    true,
+	reflect.Int16:   true,
+	reflect.Int32:   true,
+	reflect.Int64:   true,
+	reflect.Uint:    true,
+	reflect.Uint8:   true,
+	reflect.Uint16:  true,
+	reflect.Uint32:  true,
+	reflect.Uint64:  true,
+	reflect.Float32: true,
+	reflect.Float64: true,
+}
+
+func isNumber(kind reflect.Kind) bool {
+	return numberKinds[kind]
+}
+
+// nonNumberPrimitiveKinds is the non-number set of Kinds that we support converting to TypeScript.
+var nonNumberPrimitiveKinds = map[reflect.Kind]bool{
+	reflect.Bool:    true,
+	reflect.Uintptr: true,
+	reflect.String:  true,
+}
+
+func isPrimitive(kind reflect.Kind) bool {
+	return numberKinds[kind] || nonNumberPrimitiveKinds[kind]
+}
+
+func isPrimitiveAlias(reflectType reflect.Type) bool {
+	return isPrimitive(reflectType.Kind()) && reflectType.Name() != reflectType.Kind().String()
 }
