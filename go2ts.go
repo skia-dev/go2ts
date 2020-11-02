@@ -40,11 +40,10 @@ func New() *Go2TS {
 func (g *Go2TS) getOrSaveTypeDeclaration(reflectType reflect.Type, typeDeclaration typescript.TypeDeclaration) typescript.TypeDeclaration {
 	if existingTypeDeclaration, ok := g.typeDeclarations[reflectType]; ok {
 		return existingTypeDeclaration
-	} else {
-		g.typeDeclarations[reflectType] = typeDeclaration
-		g.typeDeclarationsInOrder = append(g.typeDeclarationsInOrder, typeDeclaration)
-		return typeDeclaration
 	}
+	g.typeDeclarations[reflectType] = typeDeclaration
+	g.typeDeclarationsInOrder = append(g.typeDeclarationsInOrder, typeDeclaration)
+	return typeDeclaration
 }
 
 // Add a type that needs a TypeScript definition.
