@@ -30,15 +30,9 @@ func Example() {
 	}
 
 	generator := New()
-	err := generator.Add(Turtle{})
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = generator.AddUnion(AllDirections)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = generator.Render(os.Stdout)
+	generator.Add(Turtle{})
+	generator.AddUnion(AllDirections)
+	err := generator.Render(os.Stdout)
 	if err != nil {
 		log.Fatal(err)
 	}
