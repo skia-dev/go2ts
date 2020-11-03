@@ -50,41 +50,38 @@ func (g *Go2TS) getOrSaveTypeDeclaration(reflectType reflect.Type, typeDeclarati
 // Add a type that needs a TypeScript definition.
 //
 // See AddToNamespace() for more details.
-func (g *Go2TS) Add(v interface{}) error {
-	return g.AddToNamespace(v, "")
+func (g *Go2TS) Add(v interface{}) {
+	g.AddToNamespace(v, "")
 }
 
 // AddToNamespace adds a type that needs a TypeScript definition to the given TypeScript namespace.
 //
 // See AddWithNameToNamespace() for more details.
-func (g *Go2TS) AddToNamespace(v interface{}, namespace string) error {
-	return g.AddWithNameToNamespace(v, "", namespace)
+func (g *Go2TS) AddToNamespace(v interface{}, namespace string) {
+	g.AddWithNameToNamespace(v, "", namespace)
 }
 
 // AddMultiple adds multiple types in a single call.
 //
 // See AddMultipleToNamespace() for more details.
-func (g *Go2TS) AddMultiple(values ...interface{}) error {
-	return g.AddMultipleToNamespace("", values...)
+func (g *Go2TS) AddMultiple(values ...interface{}) {
+	g.AddMultipleToNamespace("", values...)
 }
 
 // AddMultipleToNamespace adds multiple types to the given TypeScript namespace in a single call.
 //
 // Will stop at the first type that fails.
-func (g *Go2TS) AddMultipleToNamespace(namespace string, values ...interface{}) error {
+func (g *Go2TS) AddMultipleToNamespace(namespace string, values ...interface{}) {
 	for _, v := range values {
-		if err := g.AddToNamespace(v, namespace); err != nil {
-			return err
-		}
+		g.AddToNamespace(v, namespace)
 	}
-	return nil
 }
 
 // AddWithName adds a type that needs a TypeScript definition.
 //
 // See AddWithNameToNamespace() for more details.
-func (g *Go2TS) AddWithName(v interface{}, interfaceName string) error {
-	return g.AddWithNameToNamespace(v, interfaceName, "")
+func (g *Go2TS) AddWithName(v interface{}, interfaceName string) {
+	g.AddWithNameToNamespace(v, interfaceName, "")
 }
 
 // AddWithNameToNamespace adds a type that needs a TypeScript definition.
@@ -106,7 +103,7 @@ func (g *Go2TS) AddWithName(v interface{}, interfaceName string) error {
 //
 // If namespace is non-empty, the type will be added inside a TypeScript
 // namespace of that name.
-func (g *Go2TS) AddWithNameToNamespace(v interface{}, interfaceName, namespace string) error {
+func (g *Go2TS) AddWithNameToNamespace(v interface{}, interfaceName, namespace string) {
 	var reflectType reflect.Type
 	switch v := v.(type) {
 	case reflect.Type:
@@ -118,42 +115,38 @@ func (g *Go2TS) AddWithNameToNamespace(v interface{}, interfaceName, namespace s
 	}
 
 	g.addTypeDeclaration(reflectType, interfaceName, namespace)
-	return nil
 }
 
 // AddUnion adds a TypeScript definition for a union type of the values in 'v',
 // which must be a slice or an array.
 //
 // See AddUnionToNamespace() for more details.
-func (g *Go2TS) AddUnion(v interface{}) error {
-	return g.AddUnionToNamespace(v, "")
+func (g *Go2TS) AddUnion(v interface{}) {
+	g.AddUnionToNamespace(v, "")
 }
 
 // AddUnionToNamespace adds a TypeScript definition for a union type of the values in 'v',
 // which must be a slice or an array, to the given TypeScript namespace.
 //
 // See AddUnionWithNameToNamespace() for more details.
-func (g *Go2TS) AddUnionToNamespace(v interface{}, namespace string) error {
-	return g.AddUnionWithNameToNamespace(v, "", namespace)
+func (g *Go2TS) AddUnionToNamespace(v interface{}, namespace string) {
+	g.AddUnionWithNameToNamespace(v, "", namespace)
 }
 
 // AddMultipleUnion adds multple union types.
 //
 // See AddMultipleUnionToNamespace() for more details.
-func (g *Go2TS) AddMultipleUnion(values ...interface{}) error {
-	return g.AddMultipleUnionToNamespace("", values...)
+func (g *Go2TS) AddMultipleUnion(values ...interface{}) {
+	g.AddMultipleUnionToNamespace("", values...)
 }
 
 // AddMultipleUnionToNamespace adds multple union types to the given TypeScript namespace.
 //
 // Will stop at the first union type that fails.
-func (g *Go2TS) AddMultipleUnionToNamespace(namespace string, values ...interface{}) error {
+func (g *Go2TS) AddMultipleUnionToNamespace(namespace string, values ...interface{}) {
 	for _, v := range values {
-		if err := g.AddUnionToNamespace(v, namespace); err != nil {
-			return err
-		}
+		g.AddUnionToNamespace(v, namespace)
 	}
-	return nil
 }
 
 // AddUnionWithName adds a TypeScript definition for a union type of the values
@@ -161,8 +154,8 @@ func (g *Go2TS) AddMultipleUnionToNamespace(namespace string, values ...interfac
 //
 // See AddUnionWithNameToNamespace() for more details.
 //
-func (g *Go2TS) AddUnionWithName(v interface{}, typeName string) error {
-	return g.AddUnionWithNameToNamespace(v, typeName, "")
+func (g *Go2TS) AddUnionWithName(v interface{}, typeName string) {
+	g.AddUnionWithNameToNamespace(v, typeName, "")
 }
 
 // AddUnionWithNameToNamespace adds a TypeScript definition for a union type of
@@ -171,11 +164,11 @@ func (g *Go2TS) AddUnionWithName(v interface{}, typeName string) error {
 // If typeName is the empty string then the name of type of elements in the
 // slice or array is used as the type name, otherwise the typeName supplied will
 // be used as the TypeScript type name.
-func (g *Go2TS) AddUnionWithNameToNamespace(v interface{}, typeName, namespace string) error {
+func (g *Go2TS) AddUnionWithNameToNamespace(v interface{}, typeName, namespace string) {
 	// We can only build union types from Go slices or arrays.
 	reflectType := reflect.TypeOf(v)
 	if reflectType.Kind() != reflect.Slice && reflectType.Kind() != reflect.Array {
-		return fmt.Errorf("AddUnionWithName must be supplied an array or slice, got %v: %v", reflectType.Kind(), v)
+		panic(fmt.Sprintf("AddUnionWithName must be supplied an array or slice, got %v: %v", reflectType.Kind(), v))
 	}
 
 	// Make sure we have a name for the union type.
@@ -204,7 +197,7 @@ func (g *Go2TS) AddUnionWithNameToNamespace(v interface{}, typeName, namespace s
 		} else if value.Kind() == reflect.String {
 			basicType = typescript.String
 		} else {
-			return fmt.Errorf("Go Kind %q cannot be used in a TypeScript union type.", value.Kind())
+			panic(fmt.Sprintf("Go Kind %q cannot be used in a TypeScript union type.", value.Kind()))
 		}
 
 		// Create a typescript.LiteralType for the current element and add it to the union type.
@@ -219,7 +212,7 @@ func (g *Go2TS) AddUnionWithNameToNamespace(v interface{}, typeName, namespace s
 		// an alias for the newly added union type.
 		existingTypeAliasDeclaration, ok := existingTypeDeclaration.(*typescript.TypeAliasDeclaration)
 		if !ok {
-			return fmt.Errorf("Go type %v was already added as something other than a TypeScript type alias.", reflectType.Elem())
+			panic(fmt.Sprintf("Go type %v was already added as something other than a TypeScript type alias.", reflectType.Elem()))
 		}
 		existingTypeAliasDeclaration.Namespace = namespace
 		existingTypeAliasDeclaration.Identifier = typeName
@@ -232,8 +225,6 @@ func (g *Go2TS) AddUnionWithNameToNamespace(v interface{}, typeName, namespace s
 			Type:       unionType,
 		})
 	}
-
-	return nil
 }
 
 // Render the TypeScript definitions to the given io.Writer.
