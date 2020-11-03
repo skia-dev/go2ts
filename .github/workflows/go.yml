@@ -32,6 +32,11 @@ jobs:
       - name: Format (Run "gofmt -s -w ." to apply fixes.)
         run: test -z "$(gofmt -s -d .)"
 
+      - name: Lint
+        run: |
+          go get -u golang.org/x/lint/golint
+          golint -set_exit_status .
+
       - name: Vet
         run: go vet .
 
