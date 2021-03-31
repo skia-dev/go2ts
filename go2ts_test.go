@@ -41,6 +41,14 @@ func TestRender_ComplexStruct_Success(t *testing.T) {
 		OutermostField string
 	}
 
+	type RecursiveStruct struct {
+		Field                   string
+		Recursion               *RecursiveStruct
+		RecursionIgnoreNil      *RecursiveStruct `go2ts:"ignorenil"`
+		RecursionSlice          []RecursiveStruct
+		RecursionSliceIgnoreNil []RecursiveStruct `go2ts:"ignorenil"`
+	}
+
 	type Mode string
 
 	type Offset int
@@ -104,6 +112,7 @@ func TestRender_ComplexStruct_Success(t *testing.T) {
 		WithEmbeddedStruct              StructWithEmbeddedStruct
 		WithEmbeddedStructPtr           StructWithEmbeddedStructPtr
 		MultilevelEmbedded              MultilevelEmbeddedStruct
+		RecursiveStruct                 RecursiveStruct
 		OptionalString                  string       `json:",omitempty"`
 		OptionalInt                     int          `json:",omitempty"`
 		OptionalFloat64                 float64      `json:",omitempty"`
@@ -184,6 +193,14 @@ export interface MultilevelEmbeddedStruct {
 	OutermostField: string;
 }
 
+export interface RecursiveStruct {
+	Field: string;
+	Recursion: RecursiveStruct | null;
+	RecursionIgnoreNil: RecursiveStruct;
+	RecursionSlice: RecursiveStruct[] | null;
+	RecursionSliceIgnoreNil: RecursiveStruct[];
+}
+
 export interface Anonymous1 {
 	A: number;
 }
@@ -204,6 +221,7 @@ export interface ComplexStruct {
 	WithEmbeddedStruct: StructWithEmbeddedStruct;
 	WithEmbeddedStructPtr: StructWithEmbeddedStructPtr;
 	MultilevelEmbedded: MultilevelEmbeddedStruct;
+	RecursiveStruct: RecursiveStruct;
 	OptionalString?: string;
 	OptionalInt?: number;
 	OptionalFloat64?: number;
@@ -274,6 +292,7 @@ export namespace orange { export type Variety = "bergamot" | "clementine"; }
 	var b bytes.Buffer
 	err := go2ts.Render(&b)
 	require.NoError(t, err)
+
 	assert.Equal(t, complexStructExpected, b.String())
 }
 
