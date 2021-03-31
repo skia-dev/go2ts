@@ -332,10 +332,25 @@ func (g *Go2TS) getAnonymousInterfaceName() string {
 // true, any properties populated on this or any recursive calls to this method will be marked as
 // optional.
 func (g *Go2TS) populateInterfaceDeclarationProperties(interfaceDeclaration *typescript.InterfaceDeclaration, structType reflect.Type, recursivelyForceOptional bool) {
-	// Iterate over all fields of the given struct.
-	for i := 0; i < structType.NumField(); i++ {
-		structField := structType.Field(i)
+	isEmbeddedStruct := func(f reflect.StructField) bool {
+		return f.Anonymous && removeIndirection(f.Type).Kind() == reflect.Struct
+	}
 
+	// Iterate over normal fields first, and embedded structs last. This ensures that outer fields
+	// will take precedence over inner fields in the case of overlapping fields, which is consistent
+	// with json.Marshal().
+	var normalFields, embeddedStructFields []reflect.StructField
+	for i := 0; i < structType.NumField(); i++ {
+		field := structType.Field(i)
+		if isEmbeddedStruct(field) {
+			embeddedStructFields = append(embeddedStructFields, field)
+		} else {
+			normalFields = append(normalFields, field)
+		}
+	}
+	allFields := append(normalFields, embeddedStructFields...)
+
+	for _, structField := range allFields {
 		// Skip unexported fields.
 		if len(structField.Name) == 0 || !ast.IsExported(structField.Name) {
 			continue
@@ -344,7 +359,7 @@ func (g *Go2TS) populateInterfaceDeclarationProperties(interfaceDeclaration *typ
 		// If the field is an embedded struct, or an embedded struct pointer, we add the inner struct's
 		// fields to the outer struct (i.e. we flatten the structs). This is consistent with
 		// json.Marshal().
-		if structField.Anonymous && removeIndirection(structField.Type).Kind() == reflect.Struct {
+		if isEmbeddedStruct(structField) {
 			// If the field is an embedded struct pointer, we recursively mark all its fields as optional.
 			// This is because json.Marshal() will omit said fields if the embedded struct pointer is nil.
 			g.populateInterfaceDeclarationProperties(interfaceDeclaration, removeIndirection(structField.Type), recursivelyForceOptional || structField.Type.Kind() == reflect.Ptr)
@@ -365,13 +380,18 @@ func (g *Go2TS) populateInterfaceDeclarationProperties(interfaceDeclaration *typ
 			continue
 		}
 
-		// If a field in an embedded struct has the same name as a field in the outer struct, the
-		// outermost field will take precendence in the output of json.Marshal(). However, this opaque
-		// behavior is probably not what the programmer intended, so we fail loudly to prevent bugs.
+		// If there's already a field with the same name as the current field, we skip it. This can
+		// happen when populating the fields of an embedded struct, and the inner and outer structs
+		// have overlapping fields, in which case the outer fields takes precedence.
+		overlaps := false
 		for _, property := range interfaceDeclaration.Properties {
 			if propertyName == property.Identifier {
-				panic(fmt.Sprintf("Attempted to populate interface %q with more than one field named %q. (Did you embed two structs with overlapping field names?)", interfaceDeclaration.Identifier, property.Identifier))
+				overlaps = true
+				break
 			}
+		}
+		if overlaps {
+			continue
 		}
 
 		// A `go2ts:"ignorenil"` tag means that any nillable types will be treated as their non-nillable
