@@ -300,16 +300,23 @@ func (g *Go2TS) addInterfaceDeclaration(structType reflect.Type, interfaceName, 
 		interfaceName = g.getAnonymousInterfaceName()
 	}
 
-	// Create the interface declaration and populate its fields, which recurses into any embedded
-	// structs.
+	// Create the interface declaration.
 	interfaceDeclaration := &typescript.InterfaceDeclaration{
 		Namespace:  namespace,
 		Identifier: interfaceName,
 		Properties: []typescript.PropertySignature{},
 	}
+
+	// Save the interface declaration before populating its fields. This guarantees that we won't get
+	// stuck in an infinite recursion if the Go struct is recursive (e.g. type Foo struct { F *Foo }).
+	g.typeDeclarations[structType] = interfaceDeclaration
+
+	// Populate the interface fields. This will recurse into any embedded structs.
 	g.populateInterfaceDeclarationProperties(interfaceDeclaration, structType, false /* =recursivelyForceOptional */)
 
-	g.typeDeclarations[structType] = interfaceDeclaration
+	// Add the interface declaration to the ordered output after populating its fields. This ensures
+	// that any new types discovered while populating the interface fields will appear before the
+	// interface declaration in the output TypeScript code.
 	g.typeDeclarationsInOrder = append(g.typeDeclarationsInOrder, interfaceDeclaration)
 
 	return interfaceDeclaration
@@ -517,7 +524,7 @@ func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, namespace 
 			Type:       tsType,
 		}
 
-		// If we've already added a TypeScript type delcaration for this Go type, we'll return a
+		// If we've already added a TypeScript type declaration for this Go type, we'll return a
 		// reference to the existing declaration, otherwise we'll return a reference to the new
 		// declaration.
 		return g.getOrSaveTypeDeclaration(reflectType, typeDeclaration).TypeReference()
