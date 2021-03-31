@@ -41,6 +41,15 @@ func TestRender_ComplexStruct_Success(t *testing.T) {
 		OutermostField string
 	}
 
+	// This struct shows that the outermost fields in embedded structs always take precedence,
+	// regardless of whether the overlapping field appears before or after the struct.
+	type StructWithOverlappingEmbeddedStructs struct {
+		InnermostStruct
+		InnermostField        int // Overlaps with InnermostStruct, but has a different type.
+		AnotherInnermostField int // Overlaps with AnotherInnermostStruct, but has a different type.
+		AnotherInnermostStruct
+	}
+
 	type RecursiveStruct struct {
 		Field                   string
 		Recursion               *RecursiveStruct
@@ -101,59 +110,60 @@ func TestRender_ComplexStruct_Success(t *testing.T) {
 	type ParamSetIgnoreNil map[string][]string
 
 	type ComplexStruct struct {
-		String                          string
-		StringWithAnnotation            string `json:"s"`
-		Bool                            bool
-		Int                             int
-		Float64                         float64
-		Time                            time.Time
-		Other                           OtherStruct
-		OtherPtr                        *OtherStruct
-		WithEmbeddedStruct              StructWithEmbeddedStruct
-		WithEmbeddedStructPtr           StructWithEmbeddedStructPtr
-		MultilevelEmbedded              MultilevelEmbeddedStruct
-		RecursiveStruct                 RecursiveStruct
-		OptionalString                  string       `json:",omitempty"`
-		OptionalInt                     int          `json:",omitempty"`
-		OptionalFloat64                 float64      `json:",omitempty"`
-		OptionalTime                    time.Time    `json:",omitempty"`
-		OptionalOtherStruct             OtherStruct  `json:",omitempty"`
-		OptionalOtherStructPtr          *OtherStruct `json:",omitempty"`
-		OptionalOtherStructPtrIgnoreNil *OtherStruct `json:",omitempty" go2ts:"ignorenil"`
-		Data                            Data
-		DataPtr                         *Data
-		ParamSet                        ParamSet
-		ParamSetIgnoreNil               ParamSetIgnoreNil `go2ts:"ignorenil"`
-		MapStringSlice                  map[string][]string
-		MapStringSliceIgnoreNil         map[string][]string `go2ts:"ignorenil"`
-		MapStringSliceSlice             map[string][][]string
-		MapStringSliceSliceIgnoreNil    map[string][][]string `go2ts:"ignorenil"`
-		MapStringPtrSlice               map[string][]*string
-		MapStringPtrSliceIgnoreNil      map[string][]*string `go2ts:"ignorenil"`
-		MapIntKeys                      map[int]string
-		MapStringAliasKeys              map[Mode]string
-		MapIntAliasKeys                 map[Offset]string
-		MapOtherStruct                  map[string]OtherStruct
-		MapOtherStructPtr               map[string]*OtherStruct
-		Slice                           []string
-		SliceIgnoreNil                  []string `go2ts:"ignorenil"`
-		SliceOfSlice                    [][]string
-		SliceOfSliceIgnoreNil           [][]string `go2ts:"ignorenil"`
-		SliceOfData                     []Data
-		MapOfData                       map[string]Data
-		MapOfSliceOfData                map[string][]Data
-		MapOfMapOfSliceOfData           map[string]map[string][]Data
-		Mode                            Mode
-		InlineStruct                    struct{ A int }
-		Array                           [3]string
-		skipped                         bool
-		Offset                          Offset
-		Color                           color.Alpha
-		Direction                       Direction
-		AppleVariety                    AppleVariety
-		OrangeVariety                   OrangeVariety
-		AppleOrchard                    AppleOrchard
-		NotSerialized                   string `json:"-"`
+		String                               string
+		StringWithAnnotation                 string `json:"s"`
+		Bool                                 bool
+		Int                                  int
+		Float64                              float64
+		Time                                 time.Time
+		Other                                OtherStruct
+		OtherPtr                             *OtherStruct
+		WithEmbeddedStruct                   StructWithEmbeddedStruct
+		WithEmbeddedStructPtr                StructWithEmbeddedStructPtr
+		MultilevelEmbedded                   MultilevelEmbeddedStruct
+		StructWithOverlappingEmbeddedStructs StructWithOverlappingEmbeddedStructs
+		RecursiveStruct                      RecursiveStruct
+		OptionalString                       string       `json:",omitempty"`
+		OptionalInt                          int          `json:",omitempty"`
+		OptionalFloat64                      float64      `json:",omitempty"`
+		OptionalTime                         time.Time    `json:",omitempty"`
+		OptionalOtherStruct                  OtherStruct  `json:",omitempty"`
+		OptionalOtherStructPtr               *OtherStruct `json:",omitempty"`
+		OptionalOtherStructPtrIgnoreNil      *OtherStruct `json:",omitempty" go2ts:"ignorenil"`
+		Data                                 Data
+		DataPtr                              *Data
+		ParamSet                             ParamSet
+		ParamSetIgnoreNil                    ParamSetIgnoreNil `go2ts:"ignorenil"`
+		MapStringSlice                       map[string][]string
+		MapStringSliceIgnoreNil              map[string][]string `go2ts:"ignorenil"`
+		MapStringSliceSlice                  map[string][][]string
+		MapStringSliceSliceIgnoreNil         map[string][][]string `go2ts:"ignorenil"`
+		MapStringPtrSlice                    map[string][]*string
+		MapStringPtrSliceIgnoreNil           map[string][]*string `go2ts:"ignorenil"`
+		MapIntKeys                           map[int]string
+		MapStringAliasKeys                   map[Mode]string
+		MapIntAliasKeys                      map[Offset]string
+		MapOtherStruct                       map[string]OtherStruct
+		MapOtherStructPtr                    map[string]*OtherStruct
+		Slice                                []string
+		SliceIgnoreNil                       []string `go2ts:"ignorenil"`
+		SliceOfSlice                         [][]string
+		SliceOfSliceIgnoreNil                [][]string `go2ts:"ignorenil"`
+		SliceOfData                          []Data
+		MapOfData                            map[string]Data
+		MapOfSliceOfData                     map[string][]Data
+		MapOfMapOfSliceOfData                map[string]map[string][]Data
+		Mode                                 Mode
+		InlineStruct                         struct{ A int }
+		Array                                [3]string
+		skipped                              bool
+		Offset                               Offset
+		Color                                color.Alpha
+		Direction                            Direction
+		AppleVariety                         AppleVariety
+		OrangeVariety                        OrangeVariety
+		AppleOrchard                         AppleOrchard
+		NotSerialized                        string `json:"-"`
 	}
 
 	const complexStructExpected = `// DO NOT EDIT. This file is automatically generated.
@@ -177,20 +187,25 @@ export interface OtherStruct {
 }
 
 export interface StructWithEmbeddedStruct {
-	InnermostField: string;
 	Field: string;
+	InnermostField: string;
 }
 
 export interface StructWithEmbeddedStructPtr {
-	InnermostField?: string;
 	Field: string;
+	InnermostField?: string;
 }
 
 export interface MultilevelEmbeddedStruct {
-	InnermostField?: string;
-	Field?: string;
-	AnotherInnermostField: string;
 	OutermostField: string;
+	Field?: string;
+	InnermostField?: string;
+	AnotherInnermostField: string;
+}
+
+export interface StructWithOverlappingEmbeddedStructs {
+	InnermostField: number;
+	AnotherInnermostField: number;
 }
 
 export interface RecursiveStruct {
@@ -221,6 +236,7 @@ export interface ComplexStruct {
 	WithEmbeddedStruct: StructWithEmbeddedStruct;
 	WithEmbeddedStructPtr: StructWithEmbeddedStructPtr;
 	MultilevelEmbedded: MultilevelEmbeddedStruct;
+	StructWithOverlappingEmbeddedStructs: StructWithOverlappingEmbeddedStructs;
 	RecursiveStruct: RecursiveStruct;
 	OptionalString?: string;
 	OptionalInt?: number;
@@ -467,22 +483,6 @@ func TestAdd_UnsupportedType_Panic(t *testing.T) {
 	go2ts := New()
 	assert.PanicsWithValue(t, `Go Kind "complex128" cannot be serialized to JSON.`, func() {
 		go2ts.Add(HasUnsupportedFieldTypes{})
-	})
-}
-
-func TestAdd_EmbeddedStructsWithOverlappingFieldNames_Panic(t *testing.T) {
-	type Inner struct {
-		F string
-	}
-
-	type Outer struct {
-		Inner
-		F string
-	}
-
-	go2ts := New()
-	assert.PanicsWithValue(t, `Attempted to populate interface "Outer" with more than one field named "F". (Did you embed two structs with overlapping field names?)`, func() {
-		go2ts.Add(Outer{})
 	})
 }
 
