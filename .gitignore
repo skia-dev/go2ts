@@ -3,3 +3,7 @@
 cmap2/
 cache/
 debug
+
+# IntelliJ IDEA.
+.idea/
+*.iml

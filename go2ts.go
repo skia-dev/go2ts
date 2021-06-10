@@ -13,6 +13,19 @@ import (
 	"github.com/skia-dev/go2ts/typescript"
 )
 
+// ignoreNilPolicy determines whether or not nil values in Go types should be reflected in the
+// output TypeScript types.
+//
+// For example, the []string Go type will be rendered as the string[] TypeScript type when ignoring
+// nil values, or as (string[] | null) when not. The latter is consistent with how json.Marshal
+// handles nil slices.
+type ignoreNilPolicy int
+
+const (
+	ignoreNil ignoreNilPolicy = iota
+	doNotIgnoreNil
+)
+
 // Go2TS writes TypeScript definitions for Go types.
 type Go2TS struct {
 	// typeDeclarations maps any added reflect.Types to their corresponding TypeScript type
@@ -113,7 +126,7 @@ func (g *Go2TS) AddWithNameToNamespace(v interface{}, interfaceName, namespace s
 		reflectType = reflect.TypeOf(v)
 	}
 
-	g.addTypeDeclaration(reflectType, interfaceName, namespace)
+	g.addTypeDeclaration(reflectType, interfaceName, namespace, doNotIgnoreNil)
 }
 
 // AddUnion adds a TypeScript definition for a union type of the values in 'v',
@@ -254,10 +267,10 @@ func (g *Go2TS) Render(w io.Writer) error {
 	return nil
 }
 
-func (g *Go2TS) addTypeDeclaration(reflectType reflect.Type, typeName, namespace string) {
+func (g *Go2TS) addTypeDeclaration(reflectType reflect.Type, typeName, namespace string, ignoreNilPolicy ignoreNilPolicy) {
 	// Struct types are declared as TypeScript interfaces.
 	if removeIndirection(reflectType).Kind() == reflect.Struct {
-		g.addInterfaceDeclaration(reflectType, typeName, namespace)
+		g.addInterfaceDeclaration(reflectType, typeName, namespace, ignoreNilPolicy)
 		return
 	}
 
@@ -273,13 +286,13 @@ func (g *Go2TS) addTypeDeclaration(reflectType reflect.Type, typeName, namespace
 	typeDeclaration := &typescript.TypeAliasDeclaration{
 		Namespace:  namespace,
 		Identifier: typeName,
-		Type:       g.reflectTypeToTypeScriptType(reflectType, namespace, true /* =wasExplicitlyAdded */, false /* =ignoreNil */),
+		Type:       g.reflectTypeToTypeScriptType(reflectType, namespace, ignoreNilPolicy, explicitlyDiscovered),
 	}
 
 	g.getOrSaveTypeDeclaration(reflectType, typeDeclaration)
 }
 
-func (g *Go2TS) addInterfaceDeclaration(structType reflect.Type, interfaceName, namespace string) *typescript.InterfaceDeclaration {
+func (g *Go2TS) addInterfaceDeclaration(structType reflect.Type, interfaceName, namespace string, ignoreNilPolicy ignoreNilPolicy) *typescript.InterfaceDeclaration {
 	structType = removeIndirection(structType)
 
 	// Only structs can be declared as TypeScript interfaces.
@@ -312,7 +325,7 @@ func (g *Go2TS) addInterfaceDeclaration(structType reflect.Type, interfaceName, 
 	g.typeDeclarations[structType] = interfaceDeclaration
 
 	// Populate the interface fields. This will recurse into any embedded structs.
-	g.populateInterfaceDeclarationProperties(interfaceDeclaration, structType, false /* =recursivelyForceOptional */)
+	g.populateInterfaceDeclarationProperties(interfaceDeclaration, structType, ignoreNilPolicy, doNotRecursivelyForceOptional)
 
 	// Add the interface declaration to the ordered output after populating its fields. This ensures
 	// that any new types discovered while populating the interface fields will appear before the
@@ -327,11 +340,24 @@ func (g *Go2TS) getAnonymousInterfaceName() string {
 	return fmt.Sprintf("Anonymous%d", g.anonymousCount)
 }
 
+// optionalFieldPolicy determines whether or not the properties of a TypeScript interface generated
+// from a Go struct should be recursively marked as optional.
+//
+// The recursion occurs in the case of a struct that embeds another struct, in which case the two
+// structs are flattened into a single TypeScript interface.
+type optionalFieldPolicy int
+
+const (
+	recursivelyForceOptional optionalFieldPolicy = iota
+	doNotRecursivelyForceOptional
+)
+
 // populateInterfaceDeclarationProperties recursively populates the properties of the given
-// interface declaration. It assumes reflectType's Kind is Struct. If recursivelyForceOptional is
-// true, any properties populated on this or any recursive calls to this method will be marked as
-// optional.
-func (g *Go2TS) populateInterfaceDeclarationProperties(interfaceDeclaration *typescript.InterfaceDeclaration, structType reflect.Type, recursivelyForceOptional bool) {
+// interface declaration. It assumes reflectType's Kind is Struct.
+//
+// If the optionalFieldPolicy is recursivelyForceOptional, any properties populated on
+// this or any recursive calls to this method will be marked as optional.
+func (g *Go2TS) populateInterfaceDeclarationProperties(interfaceDeclaration *typescript.InterfaceDeclaration, structType reflect.Type, ignoreNilPolicy ignoreNilPolicy, optionalFieldPolicy optionalFieldPolicy) {
 	isEmbeddedStruct := func(f reflect.StructField) bool {
 		return f.Anonymous && removeIndirection(f.Type).Kind() == reflect.Struct
 	}
@@ -362,7 +388,12 @@ func (g *Go2TS) populateInterfaceDeclarationProperties(interfaceDeclaration *typ
 		if isEmbeddedStruct(structField) {
 			// If the field is an embedded struct pointer, we recursively mark all its fields as optional.
 			// This is because json.Marshal() will omit said fields if the embedded struct pointer is nil.
-			g.populateInterfaceDeclarationProperties(interfaceDeclaration, removeIndirection(structField.Type), recursivelyForceOptional || structField.Type.Kind() == reflect.Ptr)
+			embeddedStructOptionalFieldPolicy := doNotRecursivelyForceOptional
+			if optionalFieldPolicy == recursivelyForceOptional || structField.Type.Kind() == reflect.Ptr {
+				embeddedStructOptionalFieldPolicy = recursivelyForceOptional
+			}
+
+			g.populateInterfaceDeclarationProperties(interfaceDeclaration, removeIndirection(structField.Type), ignoreNilPolicy, embeddedStructOptionalFieldPolicy)
 			continue
 		}
 
@@ -396,18 +427,22 @@ func (g *Go2TS) populateInterfaceDeclarationProperties(interfaceDeclaration *typ
 
 		// A `go2ts:"ignorenil"` tag means that any nillable types will be treated as their non-nillable
 		// counterparts when recursively computing the TypeScript type of the current field. Concretely,
-		// this means that pointers will have the indirection removed, and slices will be treated as
-		// arrays.
+		// this means that pointers will have the indirection removed, slices will be treated as
+		// arrays, maps won't be nullable, etc.
 		//
 		// Note that "ignorenil" propagates recursively, meaning that any previously unseen types will
 		// be added with their nil types ignored. For example, if the current field has type Foo,
 		// defined as "type Foo []string", and it's annotated with `go2ts:"ignorenil"`, then the
 		// TypeScript type Foo will be declared as "type Foo = string[]" instead of
 		// "type Foo = string[] | null".
-		ignoreNil := structField.Tag.Get("go2ts") == "ignorenil"
+		hasIgnoreNilTag := structField.Tag.Get("go2ts") == "ignorenil"
 
 		// Recursively compute the property's TypeScript type.
-		propertyType := g.reflectTypeToTypeScriptType(structField.Type, interfaceDeclaration.Namespace, false /* =wasExplicitlyAdded */, ignoreNil)
+		propertyIgnoreNilPolicy := doNotIgnoreNil
+		if ignoreNilPolicy == ignoreNil || hasIgnoreNilTag {
+			propertyIgnoreNilPolicy = ignoreNil
+		}
+		propertyType := g.reflectTypeToTypeScriptType(structField.Type, interfaceDeclaration.Namespace, propertyIgnoreNilPolicy, implicitlyDiscovered)
 
 		// We mark the property as optional if the field is tagged with "omitempty".
 		markedAsOptional := len(jsonTag) > 1 && jsonTag[1] == "omitempty"
@@ -416,18 +451,28 @@ func (g *Go2TS) populateInterfaceDeclarationProperties(interfaceDeclaration *typ
 		property := typescript.PropertySignature{
 			Identifier: propertyName,
 			Type:       propertyType,
-			Optional:   recursivelyForceOptional || markedAsOptional,
+			Optional:   optionalFieldPolicy == recursivelyForceOptional || markedAsOptional,
 		}
 		interfaceDeclaration.Properties = append(interfaceDeclaration.Properties, property)
 	}
 }
 
-func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, namespace string, wasExplicitlyAdded, ignoreNil bool) typescript.Type {
+// typeDiscovery indicates whether a Go type was explicitly added to a Go2TS instance via one of
+// the Add* methods, or implicitly, e.g. by discovering a user-defined type when inspecting the
+// field types of a Go struct type explicitly added by the user.
+type typeDiscovery int
+
+const (
+	explicitlyDiscovered typeDiscovery = iota
+	implicitlyDiscovered
+)
+
+func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, namespace string, ignoreNilPolicy ignoreNilPolicy, typeDiscovery typeDiscovery) typescript.Type {
 	// If the type is a pointer, then we remove the pointer indirection, compute the resulting
 	// TypeScript type, and return the union between that type and null.
 	if reflectType.Kind() == reflect.Ptr {
-		tsType := g.reflectTypeToTypeScriptType(removeIndirection(reflectType), namespace, wasExplicitlyAdded, ignoreNil)
-		if ignoreNil {
+		tsType := g.reflectTypeToTypeScriptType(removeIndirection(reflectType), namespace, ignoreNilPolicy, typeDiscovery)
+		if ignoreNilPolicy == ignoreNil {
 			return tsType
 		}
 		return &typescript.UnionType{
@@ -442,7 +487,7 @@ func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, namespace 
 
 	// Structs are declared as interfaces (save for time.Time, which is a special case handled below).
 	if reflectType.Kind() == reflect.Struct && !isTime(reflectType) {
-		return g.addInterfaceDeclaration(reflectType, "", namespace).TypeReference()
+		return g.addInterfaceDeclaration(reflectType, "", namespace, ignoreNilPolicy).TypeReference()
 	}
 
 	// Will hold the typescript.Type extracted from the reflect.Type.
@@ -495,15 +540,22 @@ func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, namespace 
 
 		tsType = &typescript.MapType{
 			IndexType: indexType,
-			ValueType: g.reflectTypeToTypeScriptType(reflectType.Elem(), namespace, false /* =wasExplicitlyAdded */, ignoreNil),
+			ValueType: g.reflectTypeToTypeScriptType(reflectType.Elem(), namespace, ignoreNilPolicy, implicitlyDiscovered),
+		}
+
+		// Maps can be nil.
+		if ignoreNilPolicy == doNotIgnoreNil {
+			tsType = &typescript.UnionType{
+				Types: []typescript.Type{tsType, typescript.Null},
+			}
 		}
 
 	case reflect.Slice, reflect.Array:
 		tsType = &typescript.ArrayType{
-			ItemsType: g.reflectTypeToTypeScriptType(reflectType.Elem(), namespace, false /* =wasExplicitlyAdded */, ignoreNil),
+			ItemsType: g.reflectTypeToTypeScriptType(reflectType.Elem(), namespace, ignoreNilPolicy, implicitlyDiscovered),
 		}
 		// Slices can be nil, but not arrays.
-		if reflectType.Kind() == reflect.Slice && !ignoreNil {
+		if reflectType.Kind() == reflect.Slice && ignoreNilPolicy == doNotIgnoreNil {
 			tsType = &typescript.UnionType{
 				Types: []typescript.Type{tsType, typescript.Null},
 			}
@@ -531,7 +583,7 @@ func (g *Go2TS) reflectTypeToTypeScriptType(reflectType reflect.Type, namespace 
 	//
 	// Note that we only want to do this if the type in question wasn't added explicitly via a call to
 	// one of the Go2TS.Add*() methods because said methods will add the type declarations themselves.
-	if !wasExplicitlyAdded &&
+	if typeDiscovery == implicitlyDiscovered &&
 		// All type aliases have a non-empty name.
 		reflectType.Name() != "" &&
 		// But not all types with non-empty names are aliases (e.g. the name for the int type is "int").
