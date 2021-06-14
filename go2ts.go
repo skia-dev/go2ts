@@ -66,11 +66,26 @@ func (g *Go2TS) Add(v interface{}) {
 	g.AddToNamespace(v, "")
 }
 
+// AddIgnoreNil adds a type that needs a TypeScript definition.
+//
+// See AddToNamespaceIgnoreNil() for more details.
+func (g *Go2TS) AddIgnoreNil(v interface{}) {
+	g.AddToNamespaceIgnoreNil(v, "")
+}
+
 // AddToNamespace adds a type that needs a TypeScript definition to the given TypeScript namespace.
 //
 // See AddWithNameToNamespace() for more details.
 func (g *Go2TS) AddToNamespace(v interface{}, namespace string) {
 	g.AddWithNameToNamespace(v, "", namespace)
+}
+
+// AddToNamespaceIgnoreNil adds a type that needs a TypeScript definition to the given TypeScript
+// namespace.
+//
+// See AddWithNameToNamespaceIgnoreNil() for more details.
+func (g *Go2TS) AddToNamespaceIgnoreNil(v interface{}, namespace string) {
+	g.AddWithNameToNamespaceIgnoreNil(v, "", namespace)
 }
 
 // AddMultiple adds multiple types in a single call.
@@ -96,6 +111,13 @@ func (g *Go2TS) AddWithName(v interface{}, interfaceName string) {
 	g.AddWithNameToNamespace(v, interfaceName, "")
 }
 
+// AddWithNameIgnoreNil adds a type that needs a TypeScript definition.
+//
+// See AddWithNameToNamespaceIgnoreNil() for more details.
+func (g *Go2TS) AddWithNameIgnoreNil(v interface{}, interfaceName string) {
+	g.AddWithNameToNamespaceIgnoreNil(v, interfaceName, "")
+}
+
 // AddWithNameToNamespace adds a type that needs a TypeScript definition.
 //
 // The value passed in can be an instance of a type, a reflect.Type, or a
@@ -116,6 +138,18 @@ func (g *Go2TS) AddWithName(v interface{}, interfaceName string) {
 // If namespace is non-empty, the type will be added inside a TypeScript
 // namespace of that name.
 func (g *Go2TS) AddWithNameToNamespace(v interface{}, interfaceName, namespace string) {
+	g.add(v, interfaceName, namespace, doNotIgnoreNil)
+}
+
+// AddWithNameToNamespaceIgnoreNil adds a type that needs a TypeScript definition.
+//
+// This method is identical to AddWithNameToNamespace, with the exception that any nillable values
+// will be ignored (e.g. string slices will be treated as arrays, maps won't be nullable, etc.).
+func (g *Go2TS) AddWithNameToNamespaceIgnoreNil(v interface{}, interfaceName, namespace string) {
+	g.add(v, interfaceName, namespace, ignoreNil)
+}
+
+func (g *Go2TS) add(v interface{}, interfaceName, namespace string, ignoreNilPolicy ignoreNilPolicy) {
 	var reflectType reflect.Type
 	switch v := v.(type) {
 	case reflect.Type:
@@ -126,7 +160,7 @@ func (g *Go2TS) AddWithNameToNamespace(v interface{}, interfaceName, namespace s
 		reflectType = reflect.TypeOf(v)
 	}
 
-	g.addTypeDeclaration(reflectType, interfaceName, namespace, doNotIgnoreNil)
+	g.addTypeDeclaration(reflectType, interfaceName, namespace, ignoreNilPolicy)
 }
 
 // AddUnion adds a TypeScript definition for a union type of the values in 'v',
