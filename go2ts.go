@@ -199,7 +199,6 @@ func (g *Go2TS) AddMultipleUnionToNamespace(namespace string, values ...interfac
 // in 'v', which must be a slice or an array.
 //
 // See AddUnionWithNameToNamespace() for more details.
-//
 func (g *Go2TS) AddUnionWithName(v interface{}, typeName string) {
 	g.AddUnionWithNameToNamespace(v, typeName, "")
 }
