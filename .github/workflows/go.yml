@@ -34,7 +34,7 @@ jobs:
 
       - name: Lint
         run: |
-          go get -u golang.org/x/lint/golint
+          go install golang.org/x/lint/golint@latest
           golint -set_exit_status .
 
       - name: Vet
