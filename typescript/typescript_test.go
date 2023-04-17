@@ -20,7 +20,7 @@ func TestLiteralType_ToTypeScript_Success(t *testing.T) {
 	assert.Equal(t, "123.45", literalType.ToTypeScript())
 
 	literalType = LiteralType{BasicType: String, Literal: "hello"}
-	assert.Equal(t, `"hello"`, literalType.ToTypeScript())
+	assert.Equal(t, `'hello'`, literalType.ToTypeScript())
 }
 
 func TestLiteralType_ToTypeScript_InvalidLiteral_Panics(t *testing.T) {
@@ -74,7 +74,7 @@ func TestUnionType_ToTypeScript_Success(t *testing.T) {
 			&LiteralType{BasicType: String, Literal: "left"},
 		},
 	}
-	assert.Equal(t, `"up" | "right" | "down" | "left"`, unionType.ToTypeScript())
+	assert.Equal(t, `'up' | 'right' | 'down' | 'left'`, unionType.ToTypeScript())
 }
 
 func TestTypeAliasDeclaration_ToTypeScript_Success(t *testing.T) {
@@ -91,10 +91,10 @@ func TestTypeAliasDeclaration_ToTypeScript_Success(t *testing.T) {
 		Identifier: "Direction",
 		Type:       unionType,
 	}
-	assert.Equal(t, `export type Direction = "up" | "right" | "down" | "left";`, typeAliasDeclaration.ToTypeScript())
+	assert.Equal(t, `export type Direction = 'up' | 'right' | 'down' | 'left';`, typeAliasDeclaration.ToTypeScript())
 
 	typeAliasDeclaration.Namespace = "Foo"
-	assert.Equal(t, `export namespace Foo { export type Direction = "up" | "right" | "down" | "left"; }`, typeAliasDeclaration.ToTypeScript())
+	assert.Equal(t, `export namespace Foo { export type Direction = 'up' | 'right' | 'down' | 'left'; }`, typeAliasDeclaration.ToTypeScript())
 }
 
 func TestTypeAliasDeclaration_TypeReference_ReferenceReflectsChangesInDeclaration(t *testing.T) {

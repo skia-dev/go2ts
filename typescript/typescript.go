@@ -89,7 +89,7 @@ func (l *LiteralType) ToTypeScript() string {
 	case Number:
 		return l.Literal
 	case String:
-		return fmt.Sprintf(`"%s"`, l.Literal)
+		return fmt.Sprintf(`'%s'`, l.Literal)
 	}
 	panic(fmt.Sprintf(`Invalid basic type: %q`, l.BasicType))
 }
