@@ -1,3 +1,7 @@
+**THIS REPOSITORY IS ARCHIVED**. Code moved to the Skia Infrastructure repository
+[here](https://skia.googlesource.com/buildbot/+/28404b632bd4830fe00185f5db86cfad4cc63abb/go/go2ts)
+(see [CL](https://skia-review.googlesource.com/c/buildbot/+/686339)).
+
 # go2ts
 
 ![Go](https://github.com/skia-dev/go2ts/workflows/Go/badge.svg?branch=master)
